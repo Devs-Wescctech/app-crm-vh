@@ -1,0 +1,115 @@
+import Layout from "./Layout.jsx";
+
+import Login from "./Login";
+
+import SalesPJDashboard from "./SalesPJDashboard";
+import SalesPJAgentsDashboard from "./SalesPJAgentsDashboard";
+import NewLeadPJ from "./NewLeadPJ";
+import LeadsPJKanban from "./LeadsPJKanban";
+import LeadPJSearch from "./LeadPJSearch";
+import SalesPJReports from "./SalesPJReports";
+import SalesPJWonReport from "./SalesPJWonReport";
+import LeadPJAutomations from "./LeadPJAutomations";
+import LeadPJDetail from "./LeadPJDetail";
+import AutomationLogs from "./AutomationLogs";
+
+import SalesAgenda from "./SalesAgenda";
+import SalesTasks from "./SalesTasks";
+import ProposalTemplates from "./ProposalTemplates";
+
+import Agents from "./Agents";
+import Settings from "./Settings";
+
+import PublicSignature from "./PublicSignature";
+import PublicProposal from "./PublicProposal";
+import PublicContractSign from "./PublicContractSign";
+
+import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+
+const PAGES = {
+    Login: Login,
+
+    SalesPJDashboard: SalesPJDashboard,
+    SalesPJAgentsDashboard: SalesPJAgentsDashboard,
+    NewLeadPJ: NewLeadPJ,
+    LeadsPJKanban: LeadsPJKanban,
+    LeadPJSearch: LeadPJSearch,
+    SalesPJReports: SalesPJReports,
+    SalesPJWonReport: SalesPJWonReport,
+    LeadPJAutomations: LeadPJAutomations,
+    LeadPJDetail: LeadPJDetail,
+    AutomationLogs: AutomationLogs,
+
+    SalesAgenda: SalesAgenda,
+    SalesTasks: SalesTasks,
+    ProposalTemplates: ProposalTemplates,
+
+    Agents: Agents,
+    Settings: Settings,
+
+    PublicSignature: PublicSignature,
+    PublicProposal: PublicProposal,
+    PublicContractSign: PublicContractSign,
+}
+
+function _getCurrentPage(url) {
+    if (url === '/' || url === '') {
+        return 'SalesPJDashboard';
+    }
+    if (url.endsWith('/')) {
+        url = url.slice(0, -1);
+    }
+    let urlLastPart = url.split('/').pop();
+    if (urlLastPart.includes('?')) {
+        urlLastPart = urlLastPart.split('?')[0];
+    }
+
+    const pageName = Object.keys(PAGES).find(page => page.toLowerCase() === urlLastPart.toLowerCase());
+    return pageName || 'SalesPJDashboard';
+}
+
+function PagesContent() {
+    const location = useLocation();
+    const currentPage = _getCurrentPage(location.pathname);
+    
+    return (
+        <Layout currentPageName={currentPage}>
+            <Routes>            
+                <Route path="/" element={<SalesPJDashboard />} />
+                <Route path="/login" element={<Login />} />
+
+                <Route path="/SalesPJDashboard" element={<SalesPJDashboard />} />
+                <Route path="/SalesPJAgentsDashboard" element={<SalesPJAgentsDashboard />} />
+                <Route path="/NewLeadPJ" element={<NewLeadPJ />} />
+                <Route path="/LeadsPJKanban" element={<LeadsPJKanban />} />
+                <Route path="/LeadPJSearch" element={<LeadPJSearch />} />
+                <Route path="/SalesPJReports" element={<SalesPJReports />} />
+                <Route path="/SalesPJWonReport" element={<SalesPJWonReport />} />
+                <Route path="/LeadPJAutomations" element={<LeadPJAutomations />} />
+                <Route path="/LeadPJDetail" element={<LeadPJDetail />} />
+                <Route path="/AutomationLogs" element={<AutomationLogs />} />
+
+                <Route path="/SalesAgenda" element={<SalesAgenda />} />
+                <Route path="/SalesTasks" element={<SalesTasks />} />
+                <Route path="/ProposalTemplates" element={<ProposalTemplates />} />
+
+                <Route path="/Agents" element={<Agents />} />
+                <Route path="/Settings" element={<Settings />} />
+
+                <Route path="/PublicSignature" element={<PublicSignature />} />
+                <Route path="/assinatura" element={<PublicSignature />} />
+                <Route path="/PublicProposal" element={<PublicProposal />} />
+                <Route path="/proposta-publica" element={<PublicProposal />} />
+                <Route path="/PublicContractSign" element={<PublicContractSign />} />
+            </Routes>
+        </Layout>
+    );
+}
+
+export default function Pages() {
+    return (
+        <Router>
+            <PagesContent />
+        </Router>
+    );
+}
