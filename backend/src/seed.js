@@ -51,34 +51,18 @@ async function seed() {
     const queues = queuesResult.rows;
 
     const agentsResult = await query(`
-      INSERT INTO agents (name, email, user_email, password_hash, agent_type, role, active, can_view_all_tickets, can_view_team_tickets, can_access_reports, can_manage_agents, can_manage_settings) VALUES 
-      ('Administrador Master', 'admin@wescctech.com', 'admin@wescctech.com', $1, 'admin', 'admin', true, true, true, true, true, true),
-      ('Carlos Silva', 'carlos.silva@wescctech.com', 'carlos.silva@wescctech.com', $1, 'support', 'agent', true, false, true, false, false, false),
-      ('Maria Santos', 'maria.santos@wescctech.com', 'maria.santos@wescctech.com', $1, 'support', 'agent', true, false, true, false, false, false),
-      ('João Oliveira', 'joao.oliveira@wescctech.com', 'joao.oliveira@wescctech.com', $1, 'supervisor', 'supervisor', true, true, true, true, true, false),
-      ('Ana Paula', 'ana.paula@wescctech.com', 'ana.paula@wescctech.com', $1, 'support', 'agent', true, false, true, false, false, false),
-      ('Pedro Costa', 'pedro.costa@wescctech.com', 'pedro.costa@wescctech.com', $1, 'sales', 'agent', true, false, false, true, false, false),
-      ('Fernanda Lima', 'fernanda.lima@wescctech.com', 'fernanda.lima@wescctech.com', $1, 'sales', 'agent', true, false, false, true, false, false),
-      ('Ricardo Souza', 'ricardo.souza@wescctech.com', 'ricardo.souza@wescctech.com', $1, 'supervisor', 'supervisor', true, true, true, true, true, false)
+      INSERT INTO agents (name, email, password_hash, agent_type, role, active, permissions) VALUES 
+      ('Administrador Master', 'admin@wescctech.com', $1, 'admin', 'admin', true, '{"can_view_all_tickets":true,"can_view_team_tickets":true,"can_access_reports":true,"can_manage_agents":true,"can_manage_settings":true}'),
+      ('Pedro Costa', 'pedro.costa@wescctech.com', $1, 'sales', 'agent', true, '{"can_access_reports":true}'),
+      ('Fernanda Lima', 'fernanda.lima@wescctech.com', $1, 'sales', 'agent', true, '{"can_access_reports":true}'),
+      ('Ricardo Souza', 'ricardo.souza@wescctech.com', $1, 'sales_supervisor', 'supervisor', true, '{"can_view_all_tickets":true,"can_view_team_tickets":true,"can_access_reports":true,"can_manage_agents":true}')
       ON CONFLICT (email) DO UPDATE SET 
         password_hash = EXCLUDED.password_hash,
-        user_email = EXCLUDED.user_email,
         role = EXCLUDED.role
       RETURNING id, name
     `, [passwordHash]);
     console.log(`Created or updated ${agentsResult.rowCount} agents`);
     const agents = agentsResult.rows;
-
-    const salesAgentsResult = await query(`
-      INSERT INTO sales_agents (name, email, phone, active) VALUES 
-      ('Pedro Costa', 'pedro.costa@wescctech.com', '11999887766', true),
-      ('Fernanda Lima', 'fernanda.lima@wescctech.com', '11999776655', true),
-      ('Bruno Martins', 'bruno.martins@wescctech.com', '11999665544', true)
-      ON CONFLICT DO NOTHING
-      RETURNING id, name
-    `);
-    console.log(`Created ${salesAgentsResult.rowCount} sales agents`);
-    const salesAgents = salesAgentsResult.rows;
 
     const territoriesResult = await query(`
       INSERT INTO territories (name, description, region, active) VALUES 
