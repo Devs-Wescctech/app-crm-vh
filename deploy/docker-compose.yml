@@ -1,6 +1,6 @@
 services:
   app-salestwo:
-    image: ghcr.io/wescctech/app-crm-vh:latest
+    image: ghcr.io/devs-wescctech/app-crm-vh:latest
     container_name: app-salestwo
     restart: unless-stopped
     ports:
