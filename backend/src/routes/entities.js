@@ -652,7 +652,7 @@ router.post('/leads', authMiddleware, async (req, res) => {
         return res.status(409).json({ message: `WhatsApp ja cadastrado em Vendas PF. Lead "${dup.name}" com o agente ${dup.agent_name || 'nao atribuido'}.` });
       }
       const dupPJ = await query(
-        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.phone, l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
+        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
         [cleanPhone]
       );
       if (dupPJ.rows.length > 0) {
@@ -829,7 +829,7 @@ router.post('/leads-pj', authMiddleware, async (req, res) => {
         return res.status(409).json({ message: `WhatsApp ja cadastrado em Vendas PF. Lead "${dup.name}" com o agente ${dup.agent_name || 'nao atribuido'}.` });
       }
       const dupPJ = await query(
-        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.phone, l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
+        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
         [cleanPhone]
       );
       if (dupPJ.rows.length > 0) {
@@ -992,7 +992,7 @@ router.post('/referrals', authMiddleware, async (req, res) => {
         return res.status(409).json({ message: `WhatsApp ja cadastrado em Vendas PF. Lead "${dup.name}" com o agente ${dup.agent_name || 'nao atribuido'}.` });
       }
       const dupPJ = await query(
-        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.phone, l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
+        `SELECT l.id, COALESCE(l.nome_fantasia, l.razao_social, l.contact_name) as display_name, a.name as agent_name FROM leads_pj l LEFT JOIN agents a ON l.agent_id::text = a.id::text WHERE REGEXP_REPLACE(COALESCE(l.contact_phone, ''), '[^0-9]', '', 'g') = $1`,
         [cleanPhone]
       );
       if (dupPJ.rows.length > 0) {
