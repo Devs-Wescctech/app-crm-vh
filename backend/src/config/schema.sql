@@ -409,6 +409,8 @@ CREATE TABLE IF NOT EXISTS leads_pj (
     atividade_principal TEXT,
     situacao_cadastral VARCHAR(100),
     natureza_juridica VARCHAR(255),
+    cnae_principal VARCHAR(100),
+    data_abertura VARCHAR(20),
     contact_role VARCHAR(100),
     phone VARCHAR(50),
     phone_secondary VARCHAR(50),
