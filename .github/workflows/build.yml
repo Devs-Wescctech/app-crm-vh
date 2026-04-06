@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: devs-wescctech/app-bomflow
+  IMAGE_NAME: devs-wescctech/app-crm-vh
 
 jobs:
   build-and-push:
