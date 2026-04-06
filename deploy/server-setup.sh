@@ -73,7 +73,7 @@ echo "  -> .env criado em ${APP_DIR}/.env"
 echo ""
 echo "[5/6] Login no GitHub Container Registry..."
 echo "  -> Insira seu GitHub PAT quando solicitado:"
-docker login ghcr.io -u wescctech
+docker login ghcr.io -u devs-wescctech
 echo "  -> Login realizado."
 
 echo ""
