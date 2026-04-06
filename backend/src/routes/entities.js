@@ -846,7 +846,17 @@ router.post('/leads-pj', authMiddleware, async (req, res) => {
       }
     }
 
-    const keys = Object.keys(data).filter(k => data[k] !== null && data[k] !== undefined && data[k] !== '');
+    const VALID_LEADS_PJ_COLS = new Set([
+      'cnpj','razao_social','nome_fantasia','contact_name','contact_email','contact_phone',
+      'source','stage','agent_id','value','status','address','city','state',
+      'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
+      'porte','atividade_principal','situacao_cadastral','natureza_juridica',
+      'contact_role','phone','phone_secondary','email','website',
+      'street','number','complement','neighborhood','cep',
+      'interest','num_employees','monthly_revenue','monthly_value'
+    ]);
+
+    const keys = Object.keys(data).filter(k => data[k] !== null && data[k] !== undefined && data[k] !== '' && VALID_LEADS_PJ_COLS.has(k));
     const values = keys.map(k => {
       const val = data[k];
       if (typeof val === 'object' && val !== null) return JSON.stringify(val);
@@ -886,7 +896,17 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Lead PJ not found' });
     }
     
-    const keys = Object.keys(data);
+    const VALID_LEADS_PJ_COLS = new Set([
+      'cnpj','razao_social','nome_fantasia','contact_name','contact_email','contact_phone',
+      'source','stage','agent_id','value','status','address','city','state',
+      'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
+      'porte','atividade_principal','situacao_cadastral','natureza_juridica',
+      'contact_role','phone','phone_secondary','email','website',
+      'street','number','complement','neighborhood','cep',
+      'interest','num_employees','monthly_revenue','monthly_value'
+    ]);
+
+    const keys = Object.keys(data).filter(k => VALID_LEADS_PJ_COLS.has(k));
     const values = keys.map(k => {
       const val = data[k];
       if (val === null || val === undefined) return val;
