@@ -52,12 +52,11 @@ CREATE TABLE IF NOT EXISTS agents (
     work_unit VARCHAR(100),
     whatsapp_access_token TEXT,
     whatsapp_token_expires_at TIMESTAMP,
+    phone VARCHAR(50),
+    territory_id UUID,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
-
--- sales_agents table removed - unified with agents table
--- Fields phone and territories were added to agents table
 
 CREATE TABLE IF NOT EXISTS queues (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -75,6 +74,7 @@ CREATE TABLE IF NOT EXISTS agent_types (
     description TEXT,
     color VARCHAR(100) DEFAULT 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
     modules TEXT[],
+    allowed_submenus TEXT[],
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -425,6 +425,15 @@ CREATE TABLE IF NOT EXISTS leads_pj (
     num_employees VARCHAR(50),
     monthly_revenue DECIMAL(15,2),
     monthly_value DECIMAL(15,2),
+    proposal_url TEXT,
+    proposal_status VARCHAR(50),
+    contract_token VARCHAR(255),
+    contract_signature_url TEXT,
+    contract_signed_at TIMESTAMP,
+    contract_url TEXT,
+    signature_autentique_id VARCHAR(255),
+    signature_link TEXT,
+    signature_status VARCHAR(50) DEFAULT 'none',
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -433,6 +442,7 @@ CREATE TABLE IF NOT EXISTS activities_pj (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     lead_id UUID REFERENCES leads_pj(id) ON DELETE CASCADE,
     type VARCHAR(50),
+    title VARCHAR(255),
     description TEXT,
     scheduled_at TIMESTAMP,
     completed_at TIMESTAMP,
