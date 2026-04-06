@@ -851,6 +851,7 @@ router.post('/leads-pj', authMiddleware, async (req, res) => {
       'source','stage','agent_id','value','status','address','city','state',
       'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
       'porte','atividade_principal','situacao_cadastral','natureza_juridica',
+      'cnae_principal','data_abertura',
       'contact_role','phone','phone_secondary','email','website',
       'street','number','complement','neighborhood','cep',
       'interest','num_employees','monthly_revenue','monthly_value'
@@ -901,6 +902,7 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       'source','stage','agent_id','value','status','address','city','state',
       'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
       'porte','atividade_principal','situacao_cadastral','natureza_juridica',
+      'cnae_principal','data_abertura',
       'contact_role','phone','phone_secondary','email','website',
       'street','number','complement','neighborhood','cep',
       'interest','num_employees','monthly_revenue','monthly_value'
