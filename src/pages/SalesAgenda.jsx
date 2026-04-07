@@ -951,7 +951,7 @@ function ActivityPopover({ activity, getLeadById, handleToggle, onClose }) {
                 style={{ color: BRAND.burgundy }}
               >
                 <User className="w-4 h-4 flex-shrink-0" />
-                <span>{lead.name || lead.company_name || lead.companyName}</span>
+                <span>{lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || 'Lead sem nome'}</span>
                 <ExternalLink className="w-3 h-3" />
               </Link>
             )}
