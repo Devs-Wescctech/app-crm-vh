@@ -434,6 +434,8 @@ CREATE TABLE IF NOT EXISTS leads_pj (
     signature_autentique_id VARCHAR(255),
     signature_link TEXT,
     signature_status VARCHAR(50) DEFAULT 'none',
+    concluded BOOLEAN DEFAULT FALSE,
+    lost BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
