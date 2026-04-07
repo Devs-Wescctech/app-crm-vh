@@ -449,7 +449,13 @@ CREATE TABLE IF NOT EXISTS activities_pj (
     completed BOOLEAN DEFAULT FALSE,
     outcome VARCHAR(100),
     created_by UUID REFERENCES agents(id),
+    assigned_to VARCHAR(255),
+    priority VARCHAR(50) DEFAULT 'media',
+    notes TEXT,
+    duration INTEGER,
+    reminder VARCHAR(50),
     created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
     google_event_id VARCHAR(255)
 );
 
