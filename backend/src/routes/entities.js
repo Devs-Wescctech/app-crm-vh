@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { createCrudRouter } from '../utils/crud.js';
+import { createCrudRouter, filterValidColumns } from '../utils/crud.js';
 import { authMiddleware, optionalAuth } from '../middleware/auth.js';
 import { query } from '../config/database.js';
 import { 
@@ -846,20 +846,10 @@ router.post('/leads-pj', authMiddleware, async (req, res) => {
       }
     }
 
-    const VALID_LEADS_PJ_COLS = new Set([
-      'cnpj','razao_social','nome_fantasia','contact_name','contact_email','contact_phone',
-      'source','stage','agent_id','value','status','address','city','state',
-      'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
-      'porte','atividade_principal','situacao_cadastral','natureza_juridica',
-      'cnae_principal','data_abertura',
-      'contact_role','phone','phone_secondary','email','website',
-      'street','number','complement','neighborhood','cep',
-      'interest','num_employees','monthly_revenue','monthly_value'
-    ]);
-
-    const keys = Object.keys(data).filter(k => data[k] !== null && data[k] !== undefined && data[k] !== '' && VALID_LEADS_PJ_COLS.has(k));
+    const filteredData = await filterValidColumns('leads_pj', data);
+    const keys = Object.keys(filteredData).filter(k => filteredData[k] !== null && filteredData[k] !== undefined && filteredData[k] !== '');
     const values = keys.map(k => {
-      const val = data[k];
+      const val = filteredData[k];
       if (typeof val === 'object' && val !== null) return JSON.stringify(val);
       return val;
     });
@@ -897,20 +887,10 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Lead PJ not found' });
     }
     
-    const VALID_LEADS_PJ_COLS = new Set([
-      'cnpj','razao_social','nome_fantasia','contact_name','contact_email','contact_phone',
-      'source','stage','agent_id','value','status','address','city','state',
-      'employees_count','segment','notes','custom_fields','last_contact_at','converted_at','lost_reason',
-      'porte','atividade_principal','situacao_cadastral','natureza_juridica',
-      'cnae_principal','data_abertura',
-      'contact_role','phone','phone_secondary','email','website',
-      'street','number','complement','neighborhood','cep',
-      'interest','num_employees','monthly_revenue','monthly_value'
-    ]);
-
-    const keys = Object.keys(data).filter(k => VALID_LEADS_PJ_COLS.has(k));
+    const filteredData = await filterValidColumns('leads_pj', data);
+    const keys = Object.keys(filteredData);
     const values = keys.map(k => {
-      const val = data[k];
+      const val = filteredData[k];
       if (val === null || val === undefined) return val;
       if (Array.isArray(val)) return JSON.stringify(val);
       if (typeof val === 'object') return JSON.stringify(val);
