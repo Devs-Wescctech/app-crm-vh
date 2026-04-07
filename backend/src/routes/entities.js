@@ -888,7 +888,17 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
     }
     
     const filteredData = await filterValidColumns('leads_pj', data);
+    delete filteredData.id;
+    delete filteredData.created_at;
+    if (!filteredData.updated_at) {
+      filteredData.updated_at = new Date().toISOString();
+    }
     const keys = Object.keys(filteredData);
+    
+    if (keys.length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
+    
     const values = keys.map(k => {
       const val = filteredData[k];
       if (val === null || val === undefined) return val;
@@ -907,7 +917,7 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
     
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     values.push(id);
-    const sql = `UPDATE leads_pj SET ${setClause}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`;
+    const sql = `UPDATE leads_pj SET ${setClause} WHERE id = $${values.length} RETURNING *`;
     
     const result = await query(sql, values);
     const lead = result.rows[0];
