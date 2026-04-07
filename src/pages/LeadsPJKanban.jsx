@@ -532,14 +532,14 @@ export default function LeadsPJKanban() {
       const allLeads = await base44.entities.LeadPJ.list('-created_at');
       
       if (isAdmin) {
-        return allLeads.filter(l => !l.lost);
+        return allLeads.filter(l => !l.lost && !l.concluded);
       }
 
       if (!currentAgent) return [];
 
       const canSeeAll = canViewAll(currentAgent, 'leads-pj');
       if (canSeeAll) {
-        return allLeads.filter(l => !l.lost);
+        return allLeads.filter(l => !l.lost && !l.concluded);
       }
 
       const canSeeTeam = canViewTeam(currentAgent, 'leads-pj');
@@ -548,13 +548,13 @@ export default function LeadsPJKanban() {
         const teamAgentIds = teamAgents.map(a => a.id);
 
         return allLeads.filter(l =>
-          !l.lost &&
+          !l.lost && !l.concluded &&
           (teamAgentIds.includes(l.agentId) || teamAgentIds.includes(l.agent_id))
         );
       }
 
       return allLeads.filter(l =>
-        !l.lost &&
+        !l.lost && !l.concluded &&
         (l.agentId === currentAgent.id || l.agent_id === currentAgent.id)
       );
     },
