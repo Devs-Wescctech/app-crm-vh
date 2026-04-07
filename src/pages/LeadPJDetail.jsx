@@ -294,7 +294,11 @@ export default function LeadPJDetail() {
   };
 
   const handleSaveChanges = () => {
-    updateLeadMutation.mutate(editedLead);
+    const dataToSave = { ...editedLead };
+    if (dataToSave.monthlyValue !== undefined && dataToSave.monthlyValue !== null && dataToSave.monthlyValue !== '') {
+      dataToSave.value = parseFloat(dataToSave.monthlyValue);
+    }
+    updateLeadMutation.mutate(dataToSave);
   };
 
   const handleAddNote = () => {
