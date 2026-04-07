@@ -223,6 +223,8 @@ export function createCrudRouter(tableName, options = {}) {
         const rawData = convertKeysToSnake(req.body);
         const sanitized = sanitizeData(rawData);
         const data = await filterValidColumns(tableName, sanitized);
+        delete data.id;
+        delete data.created_at;
         const keys = Object.keys(data);
         const values = Object.values(data);
         
