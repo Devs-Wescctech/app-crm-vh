@@ -316,7 +316,7 @@ export default function SalesTasks() {
       filtered = filtered.filter(t => 
         t.title?.toLowerCase().includes(query) ||
         t.description?.toLowerCase().includes(query) ||
-        getLeadById(t.leadId)?.name?.toLowerCase().includes(query)
+        (getLeadById(t.leadId)?.nomeFantasia || getLeadById(t.leadId)?.razaoSocial || getLeadById(t.leadId)?.name || '').toLowerCase().includes(query)
       );
     }
 
@@ -557,7 +557,7 @@ export default function SalesTasks() {
                                   className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-lg text-sm hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
                                 >
                                   <User className="w-3.5 h-3.5" />
-                                  <span className="max-w-[120px] truncate">{lead.name || lead.company_name || lead.companyName}</span>
+                                  <span className="max-w-[120px] truncate">{lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || 'Lead sem nome'}</span>
                                   <ExternalLink className="w-3 h-3" />
                                 </Link>
                               )}
@@ -730,7 +730,7 @@ export default function SalesTasks() {
                           <User className="w-3 h-3 text-purple-600 dark:text-purple-400" />
                         </div>
                         <span className="truncate">
-                          {getLeadById(formData.leadId)?.name || 'Lead selecionado'}
+                          {(() => { const l = getLeadById(formData.leadId); return l?.nomeFantasia || l?.razaoSocial || l?.name || l?.contactName || 'Lead selecionado'; })()}
                         </span>
                       </div>
                     ) : (
@@ -787,7 +787,7 @@ export default function SalesTasks() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="font-medium truncate flex items-center gap-1.5">
-                                  {lead.name || lead.company_name || lead.companyName || 'Lead sem nome'}
+                                  {lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || 'Lead sem nome'}
                                   {lead._leadType === 'pj' && <Badge className="text-[9px] px-1 py-0 bg-blue-100 text-blue-700 flex-shrink-0">PJ</Badge>}
                                 </div>
                                 {lead.phone && (
