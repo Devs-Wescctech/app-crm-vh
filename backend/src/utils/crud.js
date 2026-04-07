@@ -92,6 +92,38 @@ function sanitizeData(data) {
   return sanitized;
 }
 
+const tableColumnsCache = {};
+
+async function getTableColumns(tableName) {
+  if (tableColumnsCache[tableName]) return tableColumnsCache[tableName];
+  try {
+    const result = await query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND table_schema = 'public'`,
+      [tableName]
+    );
+    const cols = new Set(result.rows.map(r => r.column_name));
+    tableColumnsCache[tableName] = cols;
+    return cols;
+  } catch (e) {
+    console.error(`Error getting columns for ${tableName}:`, e.message);
+    return null;
+  }
+}
+
+async function filterValidColumns(tableName, data) {
+  const validCols = await getTableColumns(tableName);
+  if (!validCols) return data;
+  const filtered = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (validCols.has(key)) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+
+export { filterValidColumns, getTableColumns };
+
 export function createCrudRouter(tableName, options = {}) {
   const { 
     searchFields = ['name'], 
@@ -165,7 +197,8 @@ export function createCrudRouter(tableName, options = {}) {
     async create(req, res) {
       try {
         const rawData = convertKeysToSnake(req.body);
-        const data = sanitizeData(rawData);
+        const sanitized = sanitizeData(rawData);
+        const data = await filterValidColumns(tableName, sanitized);
         const keys = Object.keys(data).filter(k => data[k] !== null);
         const values = keys.map(k => data[k]);
         
@@ -188,7 +221,8 @@ export function createCrudRouter(tableName, options = {}) {
       try {
         const { id } = req.params;
         const rawData = convertKeysToSnake(req.body);
-        const data = sanitizeData(rawData);
+        const sanitized = sanitizeData(rawData);
+        const data = await filterValidColumns(tableName, sanitized);
         const keys = Object.keys(data);
         const values = Object.values(data);
         
