@@ -62,6 +62,7 @@ import {
   X,
   Sparkles,
   Trophy,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,6 +110,7 @@ const menuModules = [
       { title: "Busca de Leads", url: createPageUrl("LeadPJSearch"), icon: Search },
       { title: "Relatórios", url: createPageUrl("SalesPJReports"), icon: FileBarChart, supervisorOnly: true },
       { title: "Rel. de Ganhos", url: createPageUrl("SalesPJWonReport"), icon: Trophy },
+      { title: "Rel. de Perdidos", url: createPageUrl("SalesPJLostReport"), icon: XCircle },
       { title: "Automações", url: createPageUrl("LeadPJAutomations"), icon: Zap, supervisorOnly: true },
       { title: "Tarefas", url: createPageUrl("SalesTasks"), icon: CheckSquare },
       { title: "Templates", url: createPageUrl("ProposalTemplates"), icon: FileText, supervisorOnly: true },
