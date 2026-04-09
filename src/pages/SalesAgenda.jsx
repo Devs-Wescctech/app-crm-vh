@@ -180,6 +180,10 @@ export default function SalesAgenda() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) {
+        toast.error("Erro ao sincronizar com Google Calendar");
+        return;
+      }
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["googleCalendarEvents"] });
       queryClient.invalidateQueries({ queryKey: ["activitiesPJ"] });
