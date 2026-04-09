@@ -28,6 +28,8 @@ import {
   handleCallback,
   disconnectAgent,
   fetchGoogleEvents,
+  fetchGoogleEventsMultiAgent,
+  getConnectedAgentIds,
   syncGoogleToSalesTwo,
   syncAllAgents,
 } from '../services/googleCalendarService.js';
@@ -4435,6 +4437,37 @@ router.get('/google-calendar/events', authMiddleware, loadAgentMiddleware, async
     res.json(events);
   } catch (error) {
     console.error('[Google Calendar] Events error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/google-calendar/team-events', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const agentId = req.agent?.id;
+    const agentType = req.agent?.agent_type;
+    if (!agentId) return res.json([]);
+    const { timeMin, timeMax } = req.query;
+
+    let targetAgentIds = [];
+    const connectedIds = await getConnectedAgentIds();
+
+    if (agentType === 'admin') {
+      targetAgentIds = connectedIds;
+    } else if (agentType === 'sales_supervisor' || agentType === 'supervisor') {
+      const teamId = req.agent?.team_id;
+      if (teamId) {
+        const teamResult = await query('SELECT id FROM agents WHERE team_id = $1 AND active = true', [teamId]);
+        const teamIds = teamResult.rows.map(r => r.id);
+        targetAgentIds = connectedIds.filter(id => teamIds.includes(id));
+      }
+    } else {
+      targetAgentIds = connectedIds.filter(id => id === agentId);
+    }
+
+    const events = await fetchGoogleEventsMultiAgent(targetAgentIds, timeMin, timeMax);
+    res.json(events);
+  } catch (error) {
+    console.error('[Google Calendar] Team events error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
