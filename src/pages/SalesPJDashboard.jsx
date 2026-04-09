@@ -271,7 +271,7 @@ export default function SalesPJDashboard() {
         />
         <StatsCard
           title="Vendas Fechadas"
-          value={`R$ ${receitaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+          value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(receitaTotal || 0)}
           icon={Trophy}
           color="green"
           subtitle={`${vendas} vendas • ${taxaConversao}% conversão`}
@@ -287,7 +287,7 @@ export default function SalesPJDashboard() {
         />
         <StatsCard
           title="Ticket Médio"
-          value={`R$ ${parseFloat(ticketMedio).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+          value={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(ticketMedio) || 0)}
           icon={Target}
           color="blue"
           delay={0.2}
