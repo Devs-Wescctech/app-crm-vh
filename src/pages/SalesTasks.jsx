@@ -132,11 +132,47 @@ export default function SalesTasks() {
     scheduledAt: '',
   });
 
-  const { data: activities = [], isLoading: loadingActivities } = useQuery({
+  const { data: user } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: () => base44.auth.me(),
+  });
+
+  const { data: allAgents = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => base44.entities.Agent.list(),
+    staleTime: 1000 * 60 * 2,
+  });
+
+  const currentAgent = user?.agent;
+  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
+  const isAdmin = currentAgentType === 'admin';
+  const isSupervisor = currentAgentType === 'sales_supervisor' || currentAgentType === 'supervisor';
+
+  const { data: allActivities = [], isLoading: loadingActivities } = useQuery({
     queryKey: ['activitiesPJ'],
     queryFn: () => base44.entities.ActivityPJ.list('-scheduledAt', 500),
     staleTime: 1000 * 60 * 2,
   });
+
+  const activities = useMemo(() => {
+    if (isAdmin) return allActivities;
+    if (!currentAgent) return [];
+    if (isSupervisor) {
+      const teamId = currentAgent.teamId || currentAgent.team_id;
+      const teamAgentIds = allAgents
+        .filter(a => (a.teamId || a.team_id) === teamId)
+        .map(a => a.id);
+      teamAgentIds.push(currentAgent.id);
+      return allActivities.filter(a => {
+        const assignedTo = a.assignedTo || a.assigned_to;
+        return !assignedTo || teamAgentIds.includes(assignedTo);
+      });
+    }
+    return allActivities.filter(a => {
+      const assignedTo = a.assignedTo || a.assigned_to;
+      return !assignedTo || assignedTo === currentAgent.id;
+    });
+  }, [allActivities, currentAgent, isAdmin, isSupervisor, allAgents]);
 
   const { data: leadsPJ = [], isLoading: loadingLeads } = useQuery({
     queryKey: ['leadsPJ'],
