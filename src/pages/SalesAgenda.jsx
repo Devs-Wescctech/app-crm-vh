@@ -99,6 +99,8 @@ export default function SalesAgenda() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [filterType, setFilterType] = useState("all");
   const [showGoogleEvents, setShowGoogleEvents] = useState(true);
+  const [showTeamGoogleEvents, setShowTeamGoogleEvents] = useState(false);
+  const [selectedGcalAgent, setSelectedGcalAgent] = useState("mine");
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [newTaskForm, setNewTaskForm] = useState({
@@ -156,17 +158,18 @@ export default function SalesAgenda() {
   }, [selectedDate.getFullYear(), selectedDate.getMonth()]);
 
   const { data: googleEvents = [] } = useQuery({
-    queryKey: ["googleCalendarEvents", gcalFetchRange.start.toISOString()],
+    queryKey: ["googleCalendarEvents", gcalFetchRange.start.toISOString(), showTeamGoogleEvents],
     queryFn: async () => {
       const token = localStorage.getItem("token");
+      const endpoint = showTeamGoogleEvents ? '/api/functions/google-calendar/team-events' : '/api/functions/google-calendar/events';
       const res = await fetch(
-        `/api/functions/google-calendar/events?timeMin=${gcalFetchRange.start.toISOString()}&timeMax=${gcalFetchRange.end.toISOString()}`,
+        `${endpoint}?timeMin=${gcalFetchRange.start.toISOString()}&timeMax=${gcalFetchRange.end.toISOString()}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: gcalStatus?.connected === true && showGoogleEvents,
+    enabled: (gcalStatus?.connected === true || showTeamGoogleEvents) && showGoogleEvents,
     staleTime: 1000 * 60 * 3,
   });
 
@@ -230,17 +233,29 @@ export default function SalesAgenda() {
   };
 
   const currentAgent = user?.agent || agents.find((a) => a.userEmail === user?.email || a.email === user?.email);
-  const isAdmin = currentAgent?.agentType === "admin" || currentAgent?.agent_type === "admin";
+  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
+  const isAdmin = currentAgentType === "admin";
+  const isSupervisor = currentAgentType === "sales_supervisor" || currentAgentType === "supervisor";
+  const canSeeTeam = isAdmin || isSupervisor;
 
   const myActivities = useMemo(() => {
     return activities.filter((act) => {
       if (isAdmin) return true;
       if (!currentAgent) return true;
+      if (isSupervisor) {
+        const teamId = currentAgent.teamId || currentAgent.team_id;
+        const teamAgentIds = agents
+          .filter(a => (a.teamId || a.team_id) === teamId)
+          .map(a => a.id);
+        teamAgentIds.push(currentAgent.id);
+        const assignedTo = getVal(act, "assignedTo", "assigned_to");
+        return !assignedTo || teamAgentIds.includes(assignedTo);
+      }
       const assignedTo = getVal(act, "assignedTo", "assigned_to");
       const createdBy = getVal(act, "createdBy", "created_by");
       return assignedTo === user?.email || assignedTo === currentAgent?.id || createdBy === currentAgent?.id || !assignedTo;
     });
-  }, [activities, isAdmin, currentAgent, user]);
+  }, [activities, isAdmin, isSupervisor, currentAgent, user, agents]);
 
   const filtered = filterType === "all" ? myActivities : myActivities.filter((a) => a.type === filterType);
 
@@ -451,6 +466,20 @@ export default function SalesAgenda() {
                   <Link2 className="w-3 h-3" />
                   <span className="text-[11px]">Google conectado</span>
                 </div>
+              )}
+              {canSeeTeam && (
+                <button
+                  onClick={() => {
+                    setShowTeamGoogleEvents(!showTeamGoogleEvents);
+                    queryClient.invalidateQueries({ queryKey: ["googleCalendarEvents"] });
+                  }}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs font-medium transition-colors mt-1 ${
+                    showTeamGoogleEvents ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <User className="w-3 h-3" />
+                  {isAdmin ? "Ver agenda de todos" : "Ver agenda da equipe"}
+                </button>
               )}
             </div>
           </div>
@@ -758,7 +787,7 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
                       {ev.summary}
                     </p>
                     <p className="text-[10px] text-gray-500 truncate">
-                      {format(start, "HH:mm")} · Google Calendar
+                      {format(start, "HH:mm")} · {ev._agentName ? `${ev._agentName}` : 'Google Calendar'}
                     </p>
                   </div>
                 );
