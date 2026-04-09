@@ -9,6 +9,7 @@ import LeadsPJKanban from "./LeadsPJKanban";
 import LeadPJSearch from "./LeadPJSearch";
 import SalesPJReports from "./SalesPJReports";
 import SalesPJWonReport from "./SalesPJWonReport";
+import SalesPJLostReport from "./SalesPJLostReport";
 import LeadPJAutomations from "./LeadPJAutomations";
 import LeadPJDetail from "./LeadPJDetail";
 import AutomationLogs from "./AutomationLogs";
@@ -36,6 +37,7 @@ const PAGES = {
     LeadPJSearch: LeadPJSearch,
     SalesPJReports: SalesPJReports,
     SalesPJWonReport: SalesPJWonReport,
+    SalesPJLostReport: SalesPJLostReport,
     LeadPJAutomations: LeadPJAutomations,
     LeadPJDetail: LeadPJDetail,
     AutomationLogs: AutomationLogs,
@@ -85,6 +87,7 @@ function PagesContent() {
                 <Route path="/LeadPJSearch" element={<LeadPJSearch />} />
                 <Route path="/SalesPJReports" element={<SalesPJReports />} />
                 <Route path="/SalesPJWonReport" element={<SalesPJWonReport />} />
+                <Route path="/SalesPJLostReport" element={<SalesPJLostReport />} />
                 <Route path="/LeadPJAutomations" element={<LeadPJAutomations />} />
                 <Route path="/LeadPJDetail" element={<LeadPJDetail />} />
                 <Route path="/AutomationLogs" element={<AutomationLogs />} />
