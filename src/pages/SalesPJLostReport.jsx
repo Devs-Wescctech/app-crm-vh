@@ -303,15 +303,15 @@ export default function SalesPJLostReport() {
         teams={teams}
         agents={displayAgents}
         selectedPeriod={selectedPeriod}
-        setSelectedPeriod={setSelectedPeriod}
         dateRange={dateRange}
-        setDateRange={setDateRange}
         selectedAgent={selectedAgent}
-        setSelectedAgent={setSelectedAgent}
         selectedTeam={selectedTeam}
-        setSelectedTeam={setSelectedTeam}
-        onClear={handleClearFilters}
-        isAdmin={isAdmin}
+        onPeriodChange={setSelectedPeriod}
+        onDateRangeChange={(v) => { setDateRange(v); setCurrentPage(1); }}
+        onAgentChange={(v) => { setSelectedAgent(v); setCurrentPage(1); }}
+        onTeamChange={(v) => { setSelectedTeam(v); setCurrentPage(1); }}
+        onClearFilters={handleClearFilters}
+        showAgentFilter={true}
       />
 
       <div className="flex items-center gap-2 flex-wrap">
