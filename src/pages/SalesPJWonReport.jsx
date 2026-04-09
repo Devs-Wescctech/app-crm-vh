@@ -164,8 +164,9 @@ export default function SalesPJWonReport() {
     });
   }, [leadsPJ, searchText, dateRange, selectedAgent, selectedTeam, selectedSource, selectedSegment, displayAgents]);
 
+  const getLeadValue = (l) => parseFloat(l.value) || parseFloat(l.monthlyValue) || parseFloat(l.monthly_value) || 0;
   const totalRegistros = filteredLeads.length;
-  const valorTotal = filteredLeads.reduce((sum, l) => sum + (parseFloat(l.value) || 0), 0);
+  const valorTotal = filteredLeads.reduce((sum, l) => sum + getLeadValue(l), 0);
   const ticketMedio = totalRegistros > 0 ? valorTotal / totalRegistros : 0;
 
   const totalPages = Math.ceil(totalRegistros / ITEMS_PER_PAGE);
@@ -190,7 +191,7 @@ export default function SalesPJWonReport() {
     const csvContent = [
       ['RELATÓRIO DE GANHOS - VENDAS PJ'],
       [`Período: ${periodLabel}`],
-      [`Total: ${totalRegistros} | Valor Total: R$ ${valorTotal.toFixed(2)} | Ticket Médio: R$ ${ticketMedio.toFixed(2)}`],
+      [`Total: ${totalRegistros} | Valor Total: R$ ${(valorTotal || 0).toFixed(2)} | Ticket Médio: R$ ${(ticketMedio || 0).toFixed(2)}`],
       [''],
       ['Razão Social', 'Nome Fantasia', 'CNPJ', 'Contato', 'Telefone', 'Segmento', 'Valor', 'Agente', 'Dt. Criação', 'Dt. Conversão'],
       ...filteredLeads.map(lead => {
@@ -203,7 +204,7 @@ export default function SalesPJWonReport() {
           lead.contactName || lead.contact_name || '',
           lead.contactPhone || lead.contact_phone || '',
           lead.segment || '',
-          `R$ ${(parseFloat(lead.value) || 0).toFixed(2)}`,
+          `R$ ${(parseFloat(lead.value) || parseFloat(lead.monthlyValue) || parseFloat(lead.monthly_value) || 0).toFixed(2)}`,
           agent?.name || '',
           lead.createdAt ? format(new Date(lead.createdAt), 'dd/MM/yyyy', { locale: ptBR }) : '',
           convertedDate ? format(new Date(convertedDate), 'dd/MM/yyyy', { locale: ptBR }) : '',
@@ -332,7 +333,7 @@ export default function SalesPJWonReport() {
               <div>
                 <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Valor Total</p>
                 <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                  R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valorTotal || 0)}
                 </p>
               </div>
               <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl">
@@ -348,7 +349,7 @@ export default function SalesPJWonReport() {
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Ticket Médio</p>
                 <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                  R$ {ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(ticketMedio || 0)}
                 </p>
               </div>
               <div className="p-3 bg-orange-100 dark:bg-orange-950 rounded-xl">
@@ -414,7 +415,7 @@ export default function SalesPJWonReport() {
                           {lead.segment ? <Badge variant="outline">{lead.segment}</Badge> : '-'}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-right font-semibold text-emerald-600 dark:text-emerald-400">
-                          R$ {(parseFloat(lead.value) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(lead.value) || parseFloat(lead.monthlyValue) || parseFloat(lead.monthly_value) || 0)}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-gray-700 dark:text-gray-300">{agent?.name || '-'}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-center text-gray-600 dark:text-gray-400">
