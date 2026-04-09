@@ -303,6 +303,30 @@ export async function fetchGoogleEvents(agentId, timeMin, timeMax) {
   }
 }
 
+export async function fetchGoogleEventsMultiAgent(agentIds, timeMin, timeMax) {
+  const allEvents = [];
+  for (const agentId of agentIds) {
+    try {
+      const events = await fetchGoogleEvents(agentId, timeMin, timeMax);
+      const agentResult = await query('SELECT name FROM agents WHERE id = $1', [agentId]);
+      const agentName = agentResult.rows[0]?.name || 'Desconhecido';
+      events.forEach(ev => {
+        ev._agentId = agentId;
+        ev._agentName = agentName;
+      });
+      allEvents.push(...events);
+    } catch (err) {
+      console.error(`[GCal] Error fetching events for agent ${agentId}:`, err.message);
+    }
+  }
+  return allEvents;
+}
+
+export async function getConnectedAgentIds() {
+  const result = await query('SELECT agent_id FROM google_calendar_tokens');
+  return result.rows.map(r => r.agent_id);
+}
+
 export async function syncGoogleToSalesTwo(agentId) {
   console.log('[GCal Sync] Starting sync from Google for agent', agentId);
   const oauth2 = await getAuthenticatedClient(agentId);
