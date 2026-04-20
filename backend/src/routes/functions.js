@@ -4392,8 +4392,28 @@ router.get('/google-calendar/status', authMiddleware, loadAgentMiddleware, async
   }
 });
 
+// Resolve admin status by querying the agents table directly. This bypasses
+// loadAgentMiddleware (which can fail silently if the schema differs) and
+// matches the same rule the frontend uses to render the admin UI.
+async function requireGCalAdmin(req, res, next) {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Authentication required' });
+    if (req.user.role === 'admin') return next();
+    const lookup = await query(
+      'SELECT agent_type, role FROM agents WHERE id = $1 OR email = $2 LIMIT 1',
+      [req.user.id, req.user.email]
+    );
+    const row = lookup.rows[0];
+    if (row && (row.agent_type === 'admin' || row.role === 'admin')) return next();
+    return res.status(403).json({ message: 'Admin access required' });
+  } catch (error) {
+    console.error('[Google Calendar] Admin check error:', error.message);
+    return res.status(500).json({ message: 'Failed to verify admin access' });
+  }
+}
+
 // Admin-only: read the OAuth credentials currently configured (Client Secret is masked).
-router.get('/google-calendar/admin/config', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
+router.get('/google-calendar/admin/config', authMiddleware, requireGCalAdmin, async (req, res) => {
   try {
     const cfg = await getGCalMaskedConfig();
     res.json(cfg);
@@ -4404,7 +4424,7 @@ router.get('/google-calendar/admin/config', authMiddleware, loadAgentMiddleware,
 });
 
 // Admin-only: persist OAuth credentials. Empty Client Secret preserves the existing one.
-router.put('/google-calendar/admin/config', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
+router.put('/google-calendar/admin/config', authMiddleware, requireGCalAdmin, async (req, res) => {
   try {
     const { clientId, clientSecret, redirectUri, clearClientSecret } = req.body || {};
     // Strict equality: accept only literal boolean `true`, so a stray string
