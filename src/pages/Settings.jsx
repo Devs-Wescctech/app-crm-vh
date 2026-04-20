@@ -42,8 +42,21 @@ export default function Settings() {
         return base44.entities.SystemSettings.create(data);
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+    onSuccess: (saved, variables) => {
+      queryClient.setQueryData(['systemSettings'], (old = []) => {
+        const list = Array.isArray(old) ? [...old] : [];
+        const idx = list.findIndex(s => (s.setting_key || s.settingKey) === variables.key);
+        const merged = saved && typeof saved === 'object'
+          ? saved
+          : { setting_key: variables.key, setting_value: variables.value, setting_type: variables.type || 'text' };
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], ...merged };
+        } else {
+          list.push(merged);
+        }
+        return list;
+      });
+      queryClient.refetchQueries({ queryKey: ['systemSettings'] });
       toast.success('Configuração salva com sucesso!');
     },
     onError: (error) => {

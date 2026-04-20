@@ -41,7 +41,8 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
   const { data: systemSettings = [] } = useQuery({
     queryKey: ['systemSettings'],
     queryFn: () => base44.entities.SystemSettings.list(),
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 30,
+    refetchOnMount: 'always',
   });
 
   const INTEREST_OPTIONS = (() => {
