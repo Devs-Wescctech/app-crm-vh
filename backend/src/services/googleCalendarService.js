@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { query } from '../config/database.js';
 import crypto from 'crypto';
 import { encrypt, decrypt } from '../utils/cryptoTokens.js';
+import { getConfig as getGCalConfig, isConfigured as isGCalConfigured } from './googleCalendarConfigService.js';
 
 // OAuth scope (Phase 1.2) — minimum privilege: events only.
 // Tokens granted before this change carry the legacy scope
@@ -14,14 +15,8 @@ export const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 export const GCAL_CALENDARLIST_SCOPE = 'https://www.googleapis.com/auth/calendar.calendarlist.readonly';
 export const GCAL_LEGACY_SCOPE = 'https://www.googleapis.com/auth/calendar';
 
-function isConfiguredViaEnv() {
-  return !!(process.env.GCAL_CLIENT_ID && process.env.GCAL_CLIENT_SECRET && process.env.GCAL_REDIRECT_URI);
-}
-
-function getOAuth2Client() {
-  const clientId = process.env.GCAL_CLIENT_ID;
-  const clientSecret = process.env.GCAL_CLIENT_SECRET;
-  const redirectUri = process.env.GCAL_REDIRECT_URI;
+async function getOAuth2Client() {
+  const { clientId, clientSecret, redirectUri } = await getGCalConfig();
 
   if (!clientId || !clientSecret || !redirectUri) {
     const missing = [
@@ -29,7 +24,7 @@ function getOAuth2Client() {
       !clientSecret && 'GCAL_CLIENT_SECRET',
       !redirectUri && 'GCAL_REDIRECT_URI',
     ].filter(Boolean).join(', ');
-    console.error(`[GCal] ${missing} not configured. Set in environment variables.`);
+    console.error(`[GCal] ${missing} not configured. Set via Settings → Google Agenda (admin) or environment variables.`);
     return null;
   }
 
@@ -37,7 +32,7 @@ function getOAuth2Client() {
 }
 
 async function getAuthenticatedClient(agentId) {
-  const oauth2 = getOAuth2Client();
+  const oauth2 = await getOAuth2Client();
   if (!oauth2) return null;
 
   const result = await query(
@@ -91,8 +86,8 @@ async function getAuthenticatedClient(agentId) {
 }
 
 export async function getAuthUrl(agentId) {
-  const oauth2 = getOAuth2Client();
-  if (!oauth2) throw new Error('Google Calendar não configurado no servidor. Contate o administrador (variáveis GCAL_CLIENT_ID, GCAL_CLIENT_SECRET, GCAL_REDIRECT_URI).');
+  const oauth2 = await getOAuth2Client();
+  if (!oauth2) throw new Error('Google Calendar não configurado. Peça ao administrador para preencher Client ID, Client Secret e Redirect URI em Configurações → Google Agenda.');
 
   const state = crypto.randomBytes(20).toString('hex') + ':' + agentId;
 
@@ -131,7 +126,7 @@ export async function validateOAuthState(state) {
 }
 
 export async function handleCallback(code, agentId) {
-  const oauth2 = getOAuth2Client();
+  const oauth2 = await getOAuth2Client();
   if (!oauth2) throw new Error('Google Calendar não configurado no servidor');
 
   const { tokens } = await oauth2.getToken(code);
@@ -210,7 +205,7 @@ export async function disconnectAgent(agentId) {
         console.warn(`[GCal] Could not decrypt refresh_token for agent ${agentId} during revoke: ${decErr.message}`);
       }
       if (refreshTokenPlain) {
-        const oauth2 = getOAuth2Client();
+        const oauth2 = await getOAuth2Client();
         if (oauth2) {
           try {
             await oauth2.revokeToken(refreshTokenPlain);
@@ -248,7 +243,7 @@ function isScopeOutdated(grantedScope) {
 }
 
 export async function getAgentConnectionStatus(agentId) {
-  const configured = isConfiguredViaEnv();
+  const configured = await isGCalConfigured();
 
   const result = await query(
     'SELECT calendar_email, last_sync_at, granted_scope FROM google_calendar_tokens WHERE agent_id = $1',
@@ -269,7 +264,7 @@ export async function getAgentConnectionStatus(agentId) {
 
 export async function getConnectionStatus() {
   return {
-    configured: isConfiguredViaEnv(),
+    configured: await isGCalConfigured(),
     connected: false,
     requiredScope: GCAL_SCOPE,
   };

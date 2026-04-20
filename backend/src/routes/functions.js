@@ -36,6 +36,10 @@ import {
   setTargetCalendar,
   getTargetCalendarForAgent,
 } from '../services/googleCalendarService.js';
+import {
+  getMaskedConfig as getGCalMaskedConfig,
+  saveConfig as saveGCalConfig,
+} from '../services/googleCalendarConfigService.js';
 
 const router = Router();
 
@@ -4384,6 +4388,37 @@ router.get('/google-calendar/status', authMiddleware, loadAgentMiddleware, async
     }
   } catch (error) {
     console.error('[Google Calendar] Status error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin-only: read the OAuth credentials currently configured (Client Secret is masked).
+router.get('/google-calendar/admin/config', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const cfg = await getGCalMaskedConfig();
+    res.json(cfg);
+  } catch (error) {
+    console.error('[Google Calendar] Admin get config error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin-only: persist OAuth credentials. Empty Client Secret preserves the existing one.
+router.put('/google-calendar/admin/config', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const { clientId, clientSecret, redirectUri, clearClientSecret } = req.body || {};
+    // Strict equality: accept only literal boolean `true`, so a stray string
+    // like 'false' or 0 can't accidentally wipe the stored secret.
+    const updated = await saveGCalConfig({
+      clientId,
+      clientSecret,
+      redirectUri,
+      clearClientSecret: clearClientSecret === true,
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('[Google Calendar] Admin save config error:', error.message);
+    // Most likely cause: GCAL_TOKEN_ENC_KEY missing/invalid (encrypt() throws).
     res.status(500).json({ error: error.message });
   }
 });

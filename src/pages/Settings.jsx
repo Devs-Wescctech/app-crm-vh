@@ -497,35 +497,14 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
             </div>
 
             {isAdmin && (
-              <div className="border-t pt-4 space-y-2">
-                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Detalhes técnicos (somente leitura)</p>
-                <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                  <li className="flex items-center gap-2">
-                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
-                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_CLIENT_ID</code> {isConfigured ? "configurado" : "não configurado"}</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
-                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_CLIENT_SECRET</code> {isConfigured ? "configurado" : "não configurado"}</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
-                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_REDIRECT_URI</code> {isConfigured ? "configurado" : "não configurado"}</span>
-                  </li>
-                </ul>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                  Para alterar essas credenciais, contate o administrador da infraestrutura. Os valores em si não são exibidos por segurança.
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  URI de redirecionamento esperada: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded break-all">{window.location.origin}/api/functions/google-calendar/callback</code>
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                  <strong>Dica:</strong> se ao conectar aparecer o erro <code>redirect_uri_mismatch</code>, confira se a URI acima está cadastrada exatamente igual em <em>"Authorized redirect URIs"</em> do OAuth Client no Google Cloud Console.
-                </p>
+              <div className="border-t pt-4 space-y-4">
+                <GCalAdminConfigForm onSaved={refetchStatus} />
 
-                <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Como configurar no Google Cloud Console:</p>
-                  <ol className="list-decimal ml-5 space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                <details className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                  <summary className="cursor-pointer p-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Como obter as credenciais no Google Cloud Console
+                  </summary>
+                  <ol className="list-decimal ml-5 px-3 pb-3 space-y-1 text-xs text-gray-600 dark:text-gray-400">
                     <li>
                       Acesse o{" "}
                       <a
@@ -536,28 +515,26 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
                         style={{ color: "#F98F6F" }}
                       >
                         Google Cloud Console
-                      </a>
-                      .
+                      </a>{" "}
+                      e selecione um projeto (ou crie um novo).
                     </li>
-                    <li>Crie um projeto ou selecione um existente.</li>
                     <li>
                       Em <em>APIs &amp; Services → Library</em>, ative a <strong>Google Calendar API</strong>.
                     </li>
                     <li>
-                      Em <em>APIs &amp; Services → OAuth consent screen</em>, configure a tela de consentimento (User Type: External, e adicione os e-mails dos vendedores em <em>Test users</em> enquanto o app estiver em modo Testing).
+                      Em <em>APIs &amp; Services → OAuth consent screen</em>, configure a tela de consentimento (User Type: External; adicione os e-mails dos vendedores em <em>Test users</em> enquanto estiver em modo Testing).
                     </li>
                     <li>
                       Em <em>APIs &amp; Services → Credentials</em>, crie um <strong>OAuth 2.0 Client ID</strong> do tipo <em>Aplicativo Web</em>.
                     </li>
                     <li>
-                      Em <em>"Authorized redirect URIs"</em>, adicione exatamente a URI mostrada acima (e a URI de produção, se houver).
+                      Em <em>"Authorized redirect URIs"</em>, adicione exatamente <code className="bg-white dark:bg-gray-900 px-1 rounded break-all">{window.location.origin}/api/functions/google-calendar/callback</code> (e a URI dos demais ambientes, se houver).
                     </li>
                     <li>
-                      Copie o <strong>Client ID</strong> e <strong>Client Secret</strong> e configure as variáveis de ambiente <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_CLIENT_ID</code>, <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_CLIENT_SECRET</code> e <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_REDIRECT_URI</code> no servidor.
+                      Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> e cole no formulário acima. Salve, depois clique em "Conectar minha conta Google".
                     </li>
-                    <li>Reinicie o backend e teste o botão "Conectar minha conta Google" abaixo.</li>
                   </ol>
-                </div>
+                </details>
               </div>
             )}
           </CardContent>
@@ -673,6 +650,192 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function GCalAdminConfigForm({ onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [serverConfig, setServerConfig] = useState(null);
+  const [clientId, setClientId] = useState("");
+  const [redirectUri, setRedirectUri] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+
+  const defaultRedirectUri = `${window.location.origin}/api/functions/google-calendar/callback`;
+
+  const fetchConfig = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/functions/google-calendar/admin/config", {
+        headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` },
+      });
+      if (!res.ok) throw new Error("Falha ao carregar configuração");
+      const data = await res.json();
+      setServerConfig(data);
+      setClientId(data.clientId || "");
+      setRedirectUri(data.redirectUri || "");
+      setClientSecret("");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const handleSave = async () => {
+    if (!clientId.trim()) {
+      toast.error("Informe o Client ID");
+      return;
+    }
+    if (!redirectUri.trim()) {
+      toast.error("Informe o Redirect URI");
+      return;
+    }
+    if (!serverConfig?.clientSecretHasValue && !clientSecret.trim()) {
+      toast.error("Informe o Client Secret");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const body = { clientId: clientId.trim(), redirectUri: redirectUri.trim() };
+      if (clientSecret.trim() !== "") body.clientSecret = clientSecret.trim();
+
+      const res = await fetch("/api/functions/google-calendar/admin/config", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao salvar");
+
+      toast.success("Credenciais do Google salvas com sucesso!");
+      setServerConfig(data);
+      setClientSecret("");
+      setShowSecret(false);
+      if (onSaved) onSaved();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-6 text-sm text-gray-500">
+        <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Carregando configuração...
+      </div>
+    );
+  }
+
+  const sources = serverConfig?.sources || {};
+  const sourceLabel = (s) =>
+    s === "db" ? "salvo no banco" : s === "env" ? "variável de ambiente" : "não definido";
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+        Credenciais OAuth do Google Cloud Console
+      </p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Os valores salvos aqui ficam armazenados no banco (Client Secret é criptografado).
+        Variáveis de ambiente continuam funcionando como fallback caso um campo fique em branco.
+      </p>
+
+      {serverConfig?.secretDecryptError && (
+        <div className="p-3 rounded border border-red-300 bg-red-50 text-red-700 text-xs">
+          Não foi possível descriptografar o Client Secret armazenado: {serverConfig.secretDecryptError}.
+          Salve um novo valor para corrigir.
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label className="text-sm">Client ID</Label>
+        <Input
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          placeholder="123456789-abc.apps.googleusercontent.com"
+          className="bg-white dark:bg-gray-800 font-mono text-xs"
+        />
+        <p className="text-[11px] text-gray-500">Origem atual: {sourceLabel(sources.clientId)}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-sm">Client Secret</Label>
+        <div className="relative">
+          <Input
+            type={showSecret ? "text" : "password"}
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+            placeholder={
+              serverConfig?.clientSecretHasValue
+                ? `Atual: ${serverConfig.clientSecretMasked} — deixe em branco para manter`
+                : "Cole o Client Secret"
+            }
+            className="pr-10 bg-white dark:bg-gray-800 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => setShowSecret(!showSecret)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-500">
+          Origem atual: {sourceLabel(sources.clientSecret)}. O valor é criptografado em repouso e nunca é exibido em texto puro.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-sm">Redirect URI</Label>
+        <Input
+          value={redirectUri}
+          onChange={(e) => setRedirectUri(e.target.value)}
+          placeholder={defaultRedirectUri}
+          className="bg-white dark:bg-gray-800 font-mono text-xs"
+        />
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-[11px] text-gray-500">
+            Origem atual: {sourceLabel(sources.redirectUri)}.
+          </p>
+          {redirectUri !== defaultRedirectUri && (
+            <button
+              type="button"
+              onClick={() => setRedirectUri(defaultRedirectUri)}
+              className="text-[11px] underline"
+              style={{ color: "#F98F6F" }}
+            >
+              Usar URI deste domínio ({defaultRedirectUri})
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-500">
+          Precisa bater <strong>exatamente</strong> com uma das "Authorized redirect URIs" do OAuth Client no Google Cloud Console.
+        </p>
+      </div>
+
+      <div className="flex justify-end pt-2">
+        <Button
+          onClick={handleSave}
+          disabled={saving}
+          className="text-white"
+          style={{ background: "linear-gradient(135deg, #5A2A3C, #F98F6F)" }}
+        >
+          {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+          Salvar credenciais
+        </Button>
+      </div>
     </div>
   );
 }

@@ -78,7 +78,7 @@ A pre-commit hook enforces the rule above:
 - Google Calendar-inspired layout: full-height time grid (day/week), month grid with event pills, mini calendar sidebar, activity filters, summary stats, current-time red line indicator
 - Internal activities render above Google events (z-index layering); all-day Google events supported in all views
 - **Google Calendar Integration**: Full bidirectional OAuth2 sync via `googleCalendarService.js` + `googleapis`
-  - **Admin config (one-time)**: Client ID + Secret stored in `system_settings` (keys: `google_calendar_client_id`, `google_calendar_client_secret`)
+  - **Admin config (one-time)**: Client ID, Client Secret (AES-256-GCM encrypted via `cryptoTokens.js`), and Redirect URI stored in `system_settings` (keys: `gcal_client_id`, `gcal_client_secret`, `gcal_redirect_uri`). Env vars `GCAL_CLIENT_ID/SECRET/REDIRECT_URI` remain as per-field fallback. Configurable from Settings → Google Agenda (admin only) via `GET/PUT /api/functions/google-calendar/admin/config`. See `googleCalendarConfigService.js`.
   - **Per-agent tokens**: `google_calendar_tokens` table stores OAuth tokens per agent (access_token, refresh_token, token_expiry, calendar_email, sync_token)
   - **SalesTwo → Google**: Activities created/updated/deleted in BOTH `activities` and `activities_pj` tables are automatically pushed to Google Calendar via hooks in `entities.js`
   - **Google → SalesTwo**: Periodic sync every 5 minutes (`syncAllAgents` in `server.js`) pulls new events from Google Calendar and creates `activities_pj` entries
