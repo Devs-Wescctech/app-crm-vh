@@ -14,6 +14,23 @@ SalesTwo is a focused B2B sales management platform built on a streamlined versi
 2. **Agentes** — User/agent management with permissions and access control
 3. **Configurações** — System settings (branding, permissions)
 
+## Secrets Convention
+- **Never commit real secret values to `.replit`**. The `[userenv.*]` blocks are tracked in git, so any value placed there is published to GitHub.
+- Real OAuth credentials, API keys, tokens, and similar secrets must be stored in the Replit Secrets pane (workspace secrets), which the runtime injects as environment variables — **not** in `.replit`.
+- Only non-sensitive runtime configuration (ports, public redirect URIs, feature flags) belongs in `.replit`.
+
+### Automated guardrail
+A pre-commit hook enforces the rule above:
+- `scripts/check-replit-secrets.sh` scans `.replit` for known provider patterns (Google OAuth, Stripe, OpenAI, AWS, GitHub, Slack, private-key blocks) and for high-entropy values assigned to `*_SECRET` / `*_KEY` / `*_TOKEN` / `*_PASSWORD` / `*_APIKEY` variables inside `[userenv.*]` / `[env]` sections.
+- In pre-commit mode it only blocks NEW secret-looking additions — pre-existing values are tolerated so a legacy leak does not wedge all future commits.
+- Install on a fresh clone: `bash scripts/install-git-hooks.sh` (idempotent).
+- Bypass (not recommended): `git commit --no-verify`.
+- Run manually against any file: `bash scripts/check-replit-secrets.sh path/to/file`.
+
+### Known legacy secret in `.replit`
+`GCAL_TOKEN_ENC_KEY` (encryption key for Google Calendar tokens at rest) currently lives in `[userenv.development]` of `.replit` and is therefore visible in git history. It was intentionally not rotated by the user. If/when it is rotated, the new value must go into Replit Secrets (not `.replit`), and the legacy line should be removed from `.replit` in the same commit.
+- Git history was rewritten on 2026-04-20 to scrub previously leaked `GCAL_CLIENT_ID` / `GCAL_CLIENT_SECRET` values from commit `b8b4e48` and its descendants. Those Google OAuth credentials must be rotated in Google Cloud Console.
+
 ## User Preferences
 - I want iterative development.
 - I want to be asked before making major changes.
@@ -89,9 +106,57 @@ SalesTwo is a focused B2B sales management platform built on a streamlined versi
 
 ### Agents & Permissions
 - Admin agent: `admin@wescctech.com` / `123456`, agent_type `admin`
-- Active agent_types: `admin`, `sales`, `sales_supervisor`
+- Active agent_types: `admin`, `coordinator`, `supervisor`, `sales`
 - Permissions driven by `agent_types.modules` array from DB; fallback to `AGENT_PERMISSIONS` in `permissions.jsx`
 - Team: "Vendas" (single active team)
+- **Centralized visibility logic** (Phase 0 refactoring):
+  - Backend: `getDataScope(agent)` in `backend/src/config/permissions.js` — single source of truth for `all`/`team`/`own` scoping
+  - Frontend: `hasFullVisibility()`, `hasTeamVisibility()`, `getVisibleAgentIds()`, `getVisibleTeams()`, `getDataVisibilityKey()` in `src/components/utils/permissions.jsx`
+  - All 8 dashboard/report/kanban/agenda/tasks pages use these centralized functions instead of inline role checks
+  - `getVisibleAgentsForFilter(currentAgent, allAgents)` — returns filtered agent objects for filter dropdowns (supervisor sees only their linked agents)
+  - `getVisibleTeams(currentAgent, allTeams, allAgents)` — derives visible teams from supervisor's visible agents' team_ids (requires `allAgents` param for supervisor scoping)
+  - All filter dropdowns (DashboardFilters) across SalesPJDashboard, SalesPJReports, SalesPJWonReport, SalesPJLostReport, LeadsPJKanban, LeadPJSearch, SalesPJAgentsDashboard use these functions
+  - Old functions (`canViewAll`, `canViewTeam`) still exported for backward compatibility
+  - `isSupervisorType()` matches: `'supervisor'`, `'sales_supervisor'`, and any `*_supervisor` pattern
+- **Coordinator role** (Phase 1):
+  - `coordinator` has full data visibility (same as admin) but NO access to system settings
+  - Can manage agents and teams, but cannot create/promote agents to `admin` type (enforced both UI and server-side)
+  - Teams have `coordinator_id UUID` column linking coordinator to managed teams
+  - `canManageTeam()` and `getManagedTeams()` functions in `permissions.jsx` for team-level access control
+  - `canAccessModule('config')` returns `true` for coordinator (to access Agents page), but `canManageSettings()` returns `false`
+  - Server-side RBAC: POST/PUT `/agents` checks if requestor is coordinator and blocks creating admin agents
+  - Agent type config: purple badge (`bg-purple-100 text-purple-700`)
+  - Team form: coordinator selector added alongside supervisor selector
+- **Supervisor role** (Phase 2):
+  - `supervisor` has team-scoped data visibility (leads, reports, agents of their team only)
+  - Can manage agents in their team: create/edit/delete, but only `sales` type agents
+  - Cannot create/promote agents to `admin`, `coordinator`, or `supervisor` types (enforced server-side + UI)
+  - Teams have `supervisor_id UUID` column linking supervisor to managed teams
+  - `canManageAgentInTeam()` function in `permissions.jsx` checks team membership
+  - `canAccessModule('config')` returns `true` for supervisor (to access Agents page only)
+  - Server-side RBAC: POST/PUT/DELETE `/agents` validates supervisor can only manage their team's agents
+  - In Agents page: tabs "Times" and "Perfis de Acesso" are hidden for supervisor
+  - Agent form: team is auto-filled (supervisor's team) and not editable; type restricted to non-admin types
+  - Agent type config: emerald badge (`bg-emerald-100 text-emerald-700`)
+  - `sales_supervisor` type unified to `supervisor` via DB migration
+- **Sales (vendedor) isolation** (Phase 3):
+  - `sales` has `own`-scoped visibility only — sees only their own leads, reports, and data
+  - Cannot create, edit, or delete agents (server-side RBAC blocks POST/PUT/DELETE /agents for non-manager types)
+  - PUT /agents/:id exception: vendedor can edit their own profile (e.g., photo, working hours)
+  - `canManageAgents()` returns `false`, `canAccessModule('config')` returns `false`
+  - Menu shows only `dashboard` and `sales_pj` modules; no access to agents, teams, config, or reports pages
+  - All report pages use `getVisibleAgentIds()` which returns only `[own id]` for sales type
+- **Vendedor → Supervisor direct link** (Phase S1):
+  - `agents.supervisor_id UUID` column links each sales agent directly to their supervisor
+  - Migration auto-populates `supervisor_id` from `teams.supervisor_id` for existing sales agents
+  - `getVisibleAgentIds()` for supervisor now filters by `agent.supervisorId === currentAgent.id` (not team_id)
+  - Agent form shows "Supervisor" dropdown when agent type is `sales`; admin/coordinator can choose any supervisor; supervisor sees their own name (fixed, not editable)
+  - Agent card displays supervisor name ("Sup: Nome") when supervisor_id is set
+  - `team_id` is preserved for backward compatibility but supervisor visibility uses `supervisor_id` as primary source
+  - Backend: supervisor creates agent → `supervisor_id` forced to their own ID; `team_id` set from their team if available
+  - Backend `GET /leads-pj` now applies server-side visibility filtering: supervisor sees only leads from their linked agents; sales sees only own leads; admin/coordinator see all
+  - `SalesPJAgentsDashboard.jsx` uses `getVisibleAgentIds()` for agent stats filtering (not ad-hoc `canSeeAllAgents`)
+  - `SalesAgenda.jsx` and `SalesTasks.jsx` no longer show unassigned activities to supervisor — only activities assigned to or created by visible agents
 
 ### Technical Implementations
 - **Monorepo Structure**: Frontend and Backend coexist within a single repository.
@@ -105,9 +170,9 @@ SalesTwo is a focused B2B sales management platform built on a streamlined versi
 - **Configurable Automation Token**: WhatsApp automation token configurable via UI, stored in system_settings DB table.
 
 ## GitHub Repository
-- **Repo**: `Wescctech/app-crm-vh` (private)
-- **URL**: https://github.com/Wescctech/app-crm-vh
-- **All source files pushed**: 160 files including backend, frontend, deploy configs, logos
+- **Repo**: `Devs-Wescctech/app-crm-vh`
+- **URL**: https://github.com/Devs-Wescctech/app-crm-vh
+- **All source files pushed**: 167 files including backend, frontend, deploy configs, logos
 - **Deploy files**: `deploy/server-setup.sh` and `deploy/docker-compose.yml` use environment variables (no hardcoded credentials)
 
 ## External Dependencies

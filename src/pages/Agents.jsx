@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Edit, Trash2, UserCheck, UserX, Activity, Upload, Loader2, MessageSquare, Copy, Check, ExternalLink, MoreVertical, Clock, Users, Building2, Layers, Settings, ShieldX, KeyRound } from "lucide-react";
-import { canManageAgents } from "@/components/utils/permissions.jsx";
+import { Plus, Edit, Trash2, UserCheck, UserX, Activity, Upload, Loader2, MessageSquare, Copy, Check, ExternalLink, MoreVertical, Clock, Users, Building2, Layers, Settings, ShieldX, KeyRound, Unlink } from "lucide-react";
+import { canManageAgents, canManageAgentInTeam, isSupervisorType } from "@/components/utils/permissions.jsx";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,7 @@ const MENU_MODULES = [
       { id: "LeadPJSearch", title: "Busca de Leads" },
       { id: "SalesPJReports", title: "Relatórios" },
       { id: "SalesPJWonReport", title: "Rel. de Ganhos" },
+      { id: "LeadPJReportList", title: "Relatório de Leads" },
       { id: "LeadPJAutomations", title: "Automações" },
       { id: "AutomationLogs", title: "Logs de Automações" },
       { id: "SalesTasks", title: "Tarefas" },
@@ -69,17 +71,30 @@ const MENU_MODULES = [
       { id: "Agents", title: "Agentes" },
       { id: "Settings", title: "Configurações do Sistema" },
     ]
+  },
+  {
+    id: "systems",
+    title: "Sistemas",
+    items: [
+      { id: "SystemsSalesFields", title: "Campos de Vendas" },
+      { id: "SystemsGoogleCalendar", title: "Google Agenda" },
+      { id: "SystemsAutentique", title: "Autentique" },
+    ]
   }
 ];
 
 const AGENT_TYPE_OPTIONS = [
   { key: "admin", label: "Administrador" },
+  { key: "coordinator", label: "Coordenador" },
+  { key: "supervisor", label: "Supervisor" },
   { key: "sales", label: "Vendedor" },
   { key: "sales_supervisor", label: "Supervisor de Vendas" },
 ];
 
 const AGENT_TYPE_CONFIG = {
   admin: { label: "Administrador", color: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
+  coordinator: { label: "Coordenador", color: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" },
+  supervisor: { label: "Supervisor", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" },
   sales_supervisor: { label: "Supervisor de Vendas", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" },
   sales: { label: "Vendedor", color: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" },
 };
@@ -95,6 +110,9 @@ export default function Agents() {
 
   const currentAgent = user?.agent;
   const isAdmin = user?.role === 'admin';
+  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
+  const isSupervisor = isSupervisorType(currentAgentType);
+  const supervisorTeamId = isSupervisor ? (currentAgent?.teamId || currentAgent?.team_id) : null;
   const hasPermission = isAdmin || canManageAgents(currentAgent);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -108,7 +126,7 @@ export default function Agents() {
   
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState(null);
-  const [teamFormData, setTeamFormData] = useState({ name: "", description: "", supervisorEmail: "", active: true });
+  const [teamFormData, setTeamFormData] = useState({ name: "", description: "", supervisorEmail: "", supervisorId: "", coordinatorId: "", active: true });
 
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
   const [editingType, setEditingType] = useState(null);
@@ -128,6 +146,7 @@ export default function Agents() {
     password: "",
     agentType: "sales",
     teamId: "",
+    supervisorId: "",
     online: false,
     active: true,
     workingHours: { start: "08:00", end: "18:00", days: [1, 2, 3, 4, 5] },
@@ -200,6 +219,61 @@ export default function Agents() {
       toast.error('Erro ao excluir agente: ' + error.message);
     },
   });
+
+  // Phase 3.1/3.3 — Admin-only Google Calendar revocation.
+  const { data: gcalConnectedAgents = [] } = useQuery({
+    queryKey: ['gcal-connected-agents'],
+    queryFn: async () => {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/functions/google-calendar/connected-agents', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: user?.role === 'admin',
+    staleTime: 1000 * 60,
+  });
+  const gcalConnectedSet = new Set(gcalConnectedAgents.map(a => a.agentId));
+
+  const revokeGcalMutation = useMutation({
+    mutationFn: async (agentId) => {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`/api/functions/google-calendar/revoke-access/${agentId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Falha ao revogar acesso.');
+      return body;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['gcal-connected-agents'] });
+      const name = data?.agentName || 'vendedor';
+      if (data?.revoked) {
+        toast.success(`Acesso Google Calendar revogado para ${name}.`);
+      } else {
+        toast.success(`Acesso local removido para ${name}. Token no Google: ${data?.revokeError || 'já inválido'}.`);
+      }
+    },
+    onError: (error) => {
+      toast.error('Erro ao revogar acesso: ' + error.message);
+    },
+  });
+
+  const handleRevokeGcal = (agent) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Revogar acesso Google Calendar',
+      message: `Tem certeza que deseja revogar o acesso do Google Calendar para "${agent.name}"? O token será invalidado no Google e o vendedor precisará reconectar.`,
+      confirmLabel: 'Revogar acesso',
+      variant: 'danger',
+      onConfirm: () => {
+        revokeGcalMutation.mutate(agent.id);
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
 
   const createTeamMutation = useMutation({
     mutationFn: (data) => base44.entities.Team.create(data),
@@ -275,16 +349,28 @@ export default function Agents() {
     },
   });
 
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmLabel: '', variant: 'default', onConfirm: null });
+
   const handleDelete = (agent) => {
-    if (window.confirm(`Tem certeza que deseja excluir o agente "${agent.name}"? Esta ação não pode ser desfeita.`)) {
-      deleteAgentMutation.mutate(agent.id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir agente',
+      message: `Tem certeza que deseja excluir o agente "${agent.name}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Excluir',
+      variant: 'danger',
+      onConfirm: () => { deleteAgentMutation.mutate(agent.id); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+    });
   };
 
   const handleDeleteTeam = (team) => {
-    if (window.confirm(`Tem certeza que deseja excluir o time "${team.name}"? Esta ação não pode ser desfeita.`)) {
-      deleteTeamMutation.mutate(team.id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir time',
+      message: `Tem certeza que deseja excluir o time "${team.name}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Excluir',
+      variant: 'danger',
+      onConfirm: () => { deleteTeamMutation.mutate(team.id); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+    });
   };
 
   const handleGenerateWhatsAppToken = async (agent) => {
@@ -377,6 +463,7 @@ export default function Agents() {
       password: "",
       agentType: "sales",
       teamId: "",
+      supervisorId: isSupervisor ? (currentAgent?.id || "") : "",
       online: false,
       active: true,
       workingHours: { start: "08:00", end: "18:00", days: [1, 2, 3, 4, 5] },
@@ -392,7 +479,7 @@ export default function Agents() {
   };
 
   const resetTeamForm = () => {
-    setTeamFormData({ name: "", description: "", supervisorEmail: "", active: true });
+    setTeamFormData({ name: "", description: "", supervisorEmail: "", coordinatorId: "", active: true });
     setEditingTeam(null);
   };
 
@@ -423,9 +510,14 @@ export default function Agents() {
       toast.error(`Não é possível excluir: ${agentCount} agente(s) usam este tipo.`);
       return;
     }
-    if (window.confirm(`Tem certeza que deseja excluir o tipo "${type.label}"?`)) {
-      deleteTypeMutation.mutate(type.id);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir tipo',
+      message: `Tem certeza que deseja excluir o tipo "${type.label}"?`,
+      confirmLabel: 'Excluir',
+      variant: 'danger',
+      onConfirm: () => { deleteTypeMutation.mutate(type.id); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+    });
   };
 
   const handleTypeSubmit = () => {
@@ -472,6 +564,7 @@ export default function Agents() {
       password: "",
       agentType: agent.agentType || "sales",
       teamId: agent.teamId || "",
+      supervisorId: agent.supervisorId || agent.supervisor_id || "",
       online: agent.online || false,
       active: agent.active !== undefined ? agent.active : true,
       workingHours: agent.workingHours || { start: "08:00", end: "18:00", days: [1, 2, 3, 4, 5] },
@@ -486,6 +579,8 @@ export default function Agents() {
       name: team.name || "",
       description: team.description || "",
       supervisorEmail: team.supervisorEmail || "",
+      supervisorId: team.supervisorId || team.supervisor_id || "",
+      coordinatorId: team.coordinatorId || team.coordinator_id || "",
       active: team.active !== undefined ? team.active : true,
     });
     setTeamDialogOpen(true);
@@ -557,6 +652,13 @@ export default function Agents() {
       ...formData,
       permissions: { ...originalPerms, ...formData.permissions }
     };
+
+    if (isSupervisor) {
+      if (supervisorTeamId) {
+        dataToSend.teamId = supervisorTeamId;
+      }
+      dataToSend.supervisorId = currentAgent?.id;
+    }
     
     if (editingAgent) {
       if (!dataToSend.password) {
@@ -572,13 +674,18 @@ export default function Agents() {
   };
 
   const handleTeamSubmit = () => {
+    const submitData = {
+      ...teamFormData,
+      supervisorId: teamFormData.supervisorId === "none" ? null : teamFormData.supervisorId || null,
+      coordinatorId: teamFormData.coordinatorId === "none" ? null : teamFormData.coordinatorId || null,
+    };
     if (editingTeam) {
       updateTeamMutation.mutate({
         id: editingTeam.id,
-        data: teamFormData
+        data: submitData
       });
     } else {
-      createTeamMutation.mutate(teamFormData);
+      createTeamMutation.mutate(submitData);
     }
   };
 
@@ -632,20 +739,24 @@ export default function Agents() {
             <Users className="w-4 h-4 mr-2" />
             Vendedores
           </TabsTrigger>
-          <TabsTrigger value="teams" className="data-[state=active]:text-white" style={activeTab === 'teams' ? { backgroundColor: BURGUNDY } : {}}>
-            <Building2 className="w-4 h-4 mr-2" />
-            Times
-          </TabsTrigger>
-          <TabsTrigger value="types" className="data-[state=active]:text-white" style={activeTab === 'types' ? { backgroundColor: BURGUNDY } : {}}>
-            <Layers className="w-4 h-4 mr-2" />
-            Perfis de Acesso
-          </TabsTrigger>
+          {!isSupervisor && (
+            <TabsTrigger value="teams" className="data-[state=active]:text-white" style={activeTab === 'teams' ? { backgroundColor: BURGUNDY } : {}}>
+              <Building2 className="w-4 h-4 mr-2" />
+              Times
+            </TabsTrigger>
+          )}
+          {!isSupervisor && (
+            <TabsTrigger value="types" className="data-[state=active]:text-white" style={activeTab === 'types' ? { backgroundColor: BURGUNDY } : {}}>
+              <Layers className="w-4 h-4 mr-2" />
+              Perfis de Acesso
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* ===== ABA VENDEDORES ===== */}
         <TabsContent value="agents" className="mt-6">
           <div className="flex justify-between items-center mb-6">
-            <p className="text-sm text-gray-500">{agents.length} vendedor(es) cadastrado(s)</p>
+            <p className="text-sm text-gray-500">{(isSupervisor ? agents.filter(a => (a.supervisorId || a.supervisor_id) === currentAgent?.id) : agents).length} vendedor(es) cadastrado(s)</p>
             <Button 
               onClick={() => {
                 resetForm();
@@ -660,7 +771,7 @@ export default function Agents() {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {agents.map(agent => {
+            {(isSupervisor ? agents.filter(a => (a.supervisorId || a.supervisor_id) === currentAgent?.id) : agents).map(agent => {
               const typeBadge = getAgentTypeBadge(agent.agentType);
               const hasWhatsAppToken = !!agent.whatsappAccessToken;
               const tokenExpired = agent.whatsappTokenExpiresAt && new Date(agent.whatsappTokenExpiresAt) < new Date();
@@ -718,6 +829,18 @@ export default function Agents() {
                             <KeyRound className="w-4 h-4 mr-2 text-orange-600" />
                             Redefinir Senha
                           </DropdownMenuItem>
+                          {isAdmin && gcalConnectedSet.has(agent.id) && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleRevokeGcal(agent)}
+                                className="cursor-pointer text-amber-700 focus:text-amber-700 focus:bg-amber-50 dark:focus:bg-amber-950"
+                              >
+                                <Unlink className="w-4 h-4 mr-2" />
+                                Revogar Google Calendar
+                              </DropdownMenuItem>
+                            </>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleDelete(agent)} className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950">
                             <Trash2 className="w-4 h-4 mr-2" />
@@ -742,6 +865,14 @@ export default function Agents() {
                           <Users className="w-4 h-4 text-gray-400" />
                           <span className="text-gray-600 dark:text-gray-400">{getTeamName(agent.teamId)}</span>
                         </div>
+                        {(agent.supervisorId || agent.supervisor_id) && (
+                          <div className="flex items-center gap-2">
+                            <UserCheck className="w-4 h-4 text-gray-400" />
+                            <span className="text-gray-600 dark:text-gray-400">
+                              Sup: {agents.find(a => a.id === (agent.supervisorId || agent.supervisor_id))?.name || '-'}
+                            </span>
+                          </div>
+                        )}
                         {agent.workingHours && (
                           <div className="flex items-center gap-2">
                             <Clock className="w-4 h-4 text-gray-400" />
@@ -810,12 +941,23 @@ export default function Agents() {
                       </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-gray-500">
-                    <div className="flex items-center gap-1">
-                      <Users className="w-4 h-4" />
-                      <span>{getAgentCountByTeam(team.id)} vendedores</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <div className="flex items-center gap-1">
+                        <Users className="w-4 h-4" />
+                        <span>{getAgentCountByTeam(team.id)} vendedores</span>
+                      </div>
+                      {!team.active && <Badge variant="outline">Inativo</Badge>}
                     </div>
-                    {!team.active && <Badge variant="outline">Inativo</Badge>}
+                    {(team.coordinatorId || team.coordinator_id) && (() => {
+                      const coord = agents?.find(a => a.id === (team.coordinatorId || team.coordinator_id));
+                      return coord ? (
+                        <div className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
+                          <ShieldX className="w-3.5 h-3.5" />
+                          <span>Coord: {coord.name}</span>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -1158,11 +1300,17 @@ export default function Agents() {
                     </SelectTrigger>
                     <SelectContent>
                       {agentTypes.filter(t => t.active).length > 0 ? (
-                        agentTypes.filter(t => t.active).map((type) => (
-                          <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>
-                        ))
+                        agentTypes.filter(t => t.active).map((type) => {
+                          if (!isAdmin && currentAgentType === 'coordinator' && type.key === 'admin') return null;
+                          if (isSupervisor && ['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(type.key)) return null;
+                          return <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>;
+                        })
                       ) : (
-                        AGENT_TYPE_OPTIONS.map((type) => (
+                        AGENT_TYPE_OPTIONS.filter(type => {
+                          if (!isAdmin && currentAgentType === 'coordinator' && type.key === 'admin') return false;
+                          if (isSupervisor && ['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(type.key)) return false;
+                          return true;
+                        }).map((type) => (
                           <SelectItem key={type.key} value={type.key}>{type.label}</SelectItem>
                         ))
                       )}
@@ -1172,17 +1320,50 @@ export default function Agents() {
 
                 <div>
                   <Label className="text-gray-900 dark:text-gray-100">Time</Label>
-                  <Select value={formData.teamId} onValueChange={(val) => setFormData({...formData, teamId: val})}>
-                    <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-                      <SelectValue placeholder="Selecione o time (opcional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teams.map(team => (
-                        <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {isSupervisor ? (
+                    <Input
+                      value={teams.find(t => t.id === supervisorTeamId)?.name || "Meu Time"}
+                      disabled
+                      className="bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    />
+                  ) : (
+                    <Select value={formData.teamId} onValueChange={(val) => setFormData({...formData, teamId: val})}>
+                      <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                        <SelectValue placeholder="Selecione o time (opcional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teams.map(team => (
+                          <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
+
+                {formData.agentType === 'sales' && (
+                  <div>
+                    <Label className="text-gray-900 dark:text-gray-100">Supervisor</Label>
+                    {isSupervisor ? (
+                      <Input
+                        value={currentAgent?.name || "Eu (Supervisor)"}
+                        disabled
+                        className="bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      />
+                    ) : (
+                      <Select value={formData.supervisorId} onValueChange={(val) => setFormData({...formData, supervisorId: val === "none" ? "" : val})}>
+                        <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                          <SelectValue placeholder="Selecione o supervisor (opcional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Nenhum</SelectItem>
+                          {agents.filter(a => isSupervisorType(a.agentType)).map(sup => (
+                            <SelectItem key={sup.id} value={sup.id}>{sup.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Horário de Trabalho */}
@@ -1422,15 +1603,23 @@ export default function Agents() {
             <div className="space-y-2">
               <Label className="text-gray-900 dark:text-gray-100 font-medium">Supervisor</Label>
               <Select 
-                value={teamFormData.supervisorEmail} 
-                onValueChange={(val) => setTeamFormData({...teamFormData, supervisorEmail: val})}
+                value={teamFormData.supervisorId} 
+                onValueChange={(val) => {
+                  const selectedAgent = agents?.find(a => a.id === val);
+                  setTeamFormData({
+                    ...teamFormData, 
+                    supervisorId: val,
+                    supervisorEmail: selectedAgent?.email || teamFormData.supervisorEmail
+                  });
+                }}
               >
                 <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 h-11">
                   <SelectValue placeholder="Selecione o supervisor do time" />
                 </SelectTrigger>
                 <SelectContent>
-                  {agents?.filter(a => a.agentType === 'supervisor' || a.agentType === 'sales_supervisor' || a.agentType === 'admin').map(agent => (
-                    <SelectItem key={agent.id} value={agent.email}>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {agents?.filter(a => isSupervisorType(a.agentType) || a.agentType === 'admin').map(agent => (
+                    <SelectItem key={agent.id} value={agent.id}>
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium text-white" style={{ backgroundColor: BURGUNDY }}>
                           {agent.name?.charAt(0).toUpperCase()}
@@ -1441,7 +1630,33 @@ export default function Agents() {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-gray-500">O supervisor tem acesso aos relatórios e métricas do time</p>
+              <p className="text-xs text-gray-500">O supervisor gerencia os agentes e dados do time</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-gray-900 dark:text-gray-100 font-medium">Coordenador</Label>
+              <Select 
+                value={teamFormData.coordinatorId} 
+                onValueChange={(val) => setTeamFormData({...teamFormData, coordinatorId: val})}
+              >
+                <SelectTrigger className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 h-11">
+                  <SelectValue placeholder="Selecione o coordenador do time" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {agents?.filter(a => a.agentType === 'coordinator' || a.agentType === 'admin').map(agent => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium text-white" style={{ backgroundColor: BURGUNDY }}>
+                          {agent.name?.charAt(0).toUpperCase()}
+                        </div>
+                        {agent.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">O coordenador tem visibilidade total e gerencia os times atribuídos a ele</p>
             </div>
 
             {editingTeam && (
@@ -1860,6 +2075,17 @@ export default function Agents() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel="Cancelar"
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

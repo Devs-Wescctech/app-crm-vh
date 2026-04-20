@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds } from "@/components/utils/permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -141,7 +147,7 @@ export default function SalesAgenda() {
   const { data: gcalStatus } = useQuery({
     queryKey: ["gcalStatus"],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/status", {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -149,6 +155,21 @@ export default function SalesAgenda() {
       return res.json();
     },
     staleTime: 1000 * 60 * 5,
+  });
+
+  const { data: gcalOutboxStatus } = useQuery({
+    queryKey: ["gcalOutboxStatus"],
+    queryFn: async () => {
+      const token = localStorage.getItem("accessToken");
+      const res = await fetch("/api/functions/google-calendar/outbox-status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: gcalStatus?.connected === true,
+    refetchInterval: 30000,
+    staleTime: 15000,
   });
 
   const gcalFetchRange = useMemo(() => {
@@ -160,7 +181,7 @@ export default function SalesAgenda() {
   const { data: googleEvents = [] } = useQuery({
     queryKey: ["googleCalendarEvents", gcalFetchRange.start.toISOString(), showTeamGoogleEvents],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const endpoint = showTeamGoogleEvents ? '/api/functions/google-calendar/team-events' : '/api/functions/google-calendar/events';
       const res = await fetch(
         `${endpoint}?timeMin=${gcalFetchRange.start.toISOString()}&timeMax=${gcalFetchRange.end.toISOString()}`,
@@ -175,7 +196,7 @@ export default function SalesAgenda() {
 
   const handleRefreshGcal = async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/sync", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -237,29 +258,25 @@ export default function SalesAgenda() {
   };
 
   const currentAgent = user?.agent || agents.find((a) => a.userEmail === user?.email || a.email === user?.email);
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = currentAgentType === "admin";
-  const isSupervisor = currentAgentType === "sales_supervisor" || currentAgentType === "supervisor";
+  const isAdmin = hasFullVisibility(currentAgent);
+  const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
   const canSeeTeam = isAdmin || isSupervisor;
 
   const myActivities = useMemo(() => {
+    if (hasFullVisibility(currentAgent)) return activities;
+
+    const visibleIds = getVisibleAgentIds(currentAgent, agents);
+
     return activities.filter((act) => {
-      if (isAdmin) return true;
       if (!currentAgent) return true;
-      if (isSupervisor) {
-        const teamId = currentAgent.teamId || currentAgent.team_id;
-        const teamAgentIds = agents
-          .filter(a => (a.teamId || a.team_id) === teamId)
-          .map(a => a.id);
-        teamAgentIds.push(currentAgent.id);
-        const assignedTo = getVal(act, "assignedTo", "assigned_to");
-        return !assignedTo || teamAgentIds.includes(assignedTo);
-      }
       const assignedTo = getVal(act, "assignedTo", "assigned_to");
       const createdBy = getVal(act, "createdBy", "created_by");
-      return assignedTo === user?.email || assignedTo === currentAgent?.id || createdBy === currentAgent?.id || !assignedTo;
+      if (hasTeamVisibility(currentAgent)) {
+        return assignedTo ? visibleIds.includes(assignedTo) : (createdBy ? visibleIds.includes(createdBy) : false);
+      }
+      return assignedTo === user?.email || assignedTo === currentAgent?.id || createdBy === currentAgent?.id;
     });
-  }, [activities, isAdmin, isSupervisor, currentAgent, user, agents]);
+  }, [activities, currentAgent, user, agents]);
 
   const filtered = filterType === "all" ? myActivities : myActivities.filter((a) => a.type === filterType);
 
@@ -382,6 +399,9 @@ export default function SalesAgenda() {
           >
             <Plus className="w-3.5 h-3.5" /> Nova Atividade
           </Button>
+          {gcalStatus?.connected && (
+            <GcalSyncStatusBadge status={gcalOutboxStatus} />
+          )}
           {gcalStatus?.connected && (
             <Button variant="ghost" size="sm" onClick={handleRefreshGcal} className="text-xs h-8 gap-1 text-gray-600">
               <RefreshCw className="w-3.5 h-3.5" /> Sincronizar
@@ -1005,5 +1025,68 @@ function ActivityPopover({ activity, getLeadById, handleToggle, onClose }) {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function GcalSyncStatusBadge({ status }) {
+  if (!status) return null;
+  const { hasFailedItems, hasPendingItems, pendingCount, failedCount, lastFailedError, lastFailedTimestamp } = status;
+  if (!hasFailedItems && !hasPendingItems) return null;
+
+  const isError = hasFailedItems;
+  const palette = isError
+    ? { bg: "#fef2f2", border: "#fecaca", text: "#b91c1c", icon: AlertCircle }
+    : { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8", icon: Loader2 };
+  const Icon = palette.icon;
+  const label = isError
+    ? `Erro de Sincronização (${failedCount})`
+    : `Sincronização Pendente (${pendingCount})`;
+
+  const badge = (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium border transition-colors"
+      style={{ backgroundColor: palette.bg, borderColor: palette.border, color: palette.text }}
+      title={isError ? "Clique para detalhes" : "Aguardando processamento"}
+    >
+      <Icon className={`w-3.5 h-3.5 ${!isError ? "animate-spin" : ""}`} />
+      {label}
+    </button>
+  );
+
+  if (!isError) return badge;
+
+  let when = "";
+  try {
+    if (lastFailedTimestamp) {
+      when = format(parseISO(lastFailedTimestamp), "dd/MM/yyyy HH:mm", { locale: ptBR });
+    }
+  } catch { /* noop */ }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>{badge}</PopoverTrigger>
+      <PopoverContent align="end" className="w-80">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-red-700">
+            <AlertCircle className="w-4 h-4" />
+            Erro de sincronização com Google Calendar
+          </div>
+          <p className="text-xs text-gray-600">
+            Algumas atividades não foram sincronizadas. O sistema continuará tentando automaticamente.
+          </p>
+          <div className="bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-800 break-words">
+            <div className="font-medium text-gray-500 mb-1">Último erro:</div>
+            <div className="font-mono text-[11px] leading-snug">{lastFailedError || "Erro não informado."}</div>
+          </div>
+          {when && (
+            <div className="text-[11px] text-gray-500">Ocorrido em {when}</div>
+          )}
+          {failedCount > 0 && (
+            <div className="text-[11px] text-gray-500">{failedCount} item(ns) com falha • {pendingCount} pendente(s)</div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

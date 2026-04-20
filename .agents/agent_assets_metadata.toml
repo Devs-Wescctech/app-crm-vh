@@ -1,0 +1,32 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "28l1sKgCZ_pKLFtZ0RSAm"
+uri = "file://exports/acessos-salestwo.xlsx"
+type = "table"
+title = "Acessos SalesTwo - Usuários e Senhas"
+
+[[outputs]]
+id = "YV9U8y6Kj3-Zvyu8ZY6YX"
+uri = "file://exports/processo-migracao-salestwo.md"
+type = "text"
+title = "Processo Completo de Migração - SalesTwo"
+
+[[outputs]]
+id = "VaML4mjIwoVo3EL8PO6Cc"
+uri = "file://analise-acesso-hierarquia.md"
+type = "text"
+title = "Análise Completa - Sistema de Acessos e Hierarquia"
+
+[[outputs]]
+id = "ievOYXBhB5UrtX1wjC_rt"
+uri = "file://analise-nova-hierarquia.md"
+type = "text"
+title = "Análise Técnica - Nova Hierarquia de Acesso"
+
+[[outputs]]
+id = "LBZ1HkXacPRcB_R8rgaNo"
+uri = "file://analise-hierarquia-aprofundada.md"
+type = "text"
+title = "Análise Aprofundada - Nova Hierarquia de Acesso (Opção A vs B + Plano)"

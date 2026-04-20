@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds } from "@/components/utils/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -144,9 +145,8 @@ export default function SalesTasks() {
   });
 
   const currentAgent = user?.agent;
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = currentAgentType === 'admin';
-  const isSupervisor = currentAgentType === 'sales_supervisor' || currentAgentType === 'supervisor';
+  const isAdmin = hasFullVisibility(currentAgent);
+  const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
 
   const { data: allActivities = [], isLoading: loadingActivities } = useQuery({
     queryKey: ['activitiesPJ'],
@@ -155,24 +155,26 @@ export default function SalesTasks() {
   });
 
   const activities = useMemo(() => {
-    if (isAdmin) return allActivities;
+    const EXCLUDED_TYPES = new Set(['note', 'stage_change']);
+    const tasksOnly = allActivities.filter(a => !EXCLUDED_TYPES.has(a.type));
+
+    if (hasFullVisibility(currentAgent)) return tasksOnly;
     if (!currentAgent) return [];
-    if (isSupervisor) {
-      const teamId = currentAgent.teamId || currentAgent.team_id;
-      const teamAgentIds = allAgents
-        .filter(a => (a.teamId || a.team_id) === teamId)
-        .map(a => a.id);
-      teamAgentIds.push(currentAgent.id);
-      return allActivities.filter(a => {
+
+    const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+
+    if (hasTeamVisibility(currentAgent)) {
+      return tasksOnly.filter(a => {
         const assignedTo = a.assignedTo || a.assigned_to;
-        return !assignedTo || teamAgentIds.includes(assignedTo);
+        const createdBy = a.createdBy || a.created_by;
+        return assignedTo ? visibleIds.includes(assignedTo) : (createdBy ? visibleIds.includes(createdBy) : false);
       });
     }
-    return allActivities.filter(a => {
+    return tasksOnly.filter(a => {
       const assignedTo = a.assignedTo || a.assigned_to;
-      return !assignedTo || assignedTo === currentAgent.id;
+      return assignedTo === currentAgent.id;
     });
-  }, [allActivities, currentAgent, isAdmin, isSupervisor, allAgents]);
+  }, [allActivities, currentAgent, allAgents]);
 
   const { data: leadsPJ = [], isLoading: loadingLeads } = useQuery({
     queryKey: ['leadsPJ'],

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 function useResponsive() {
   const getScreenSize = (width) => ({
@@ -78,7 +78,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import NotificationBell from "@/components/ui/notification-bell";
-import { filterMenuItems } from "@/components/utils/permissions";
+import { filterMenuItems, hasAnySystemsAccess } from "@/components/utils/permissions";
 
 const PUBLIC_PAGES = [
   'Login', 'login', 'PublicSignature', 'PublicProposal',
@@ -111,6 +111,7 @@ const menuModules = [
       { title: "Relatórios", url: createPageUrl("SalesPJReports"), icon: FileBarChart, supervisorOnly: true },
       { title: "Rel. de Ganhos", url: createPageUrl("SalesPJWonReport"), icon: Trophy },
       { title: "Rel. de Perdidos", url: createPageUrl("SalesPJLostReport"), icon: XCircle },
+      { title: "Lista de Leads", url: createPageUrl("LeadPJReportList"), icon: FileBarChart },
       { title: "Automações", url: createPageUrl("LeadPJAutomations"), icon: Zap, supervisorOnly: true },
       { title: "Tarefas", url: createPageUrl("SalesTasks"), icon: CheckSquare },
       { title: "Templates", url: createPageUrl("ProposalTemplates"), icon: FileText, supervisorOnly: true },
@@ -376,7 +377,7 @@ function ModernSidebar({ user, filteredMenuModules, expandedModules, toggleModul
           </div>
         ))}
 
-        {user?.role === 'admin' && (
+        {(user?.role === 'admin' || hasAnySystemsAccess(user?.agent)) && (
           <div className="pt-4 mt-4 border-t border-gray-200/50 dark:border-gray-700/50">
             <Link
               to={createPageUrl("Settings")}
@@ -660,11 +661,67 @@ function LayoutContent({ children, currentPageName }) {
     }
   }, [location.pathname, isPublicPage, lastSalesModule]);
 
-  const filteredMenuModules = user?.role === 'admin'
-    ? menuModules
-    : currentAgent
-      ? filterMenuItems(currentAgent, menuModules)
-      : [];
+  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
+  const isAdminUser = user?.role === 'admin' || currentAgentType === 'admin';
+  const isCoordinatorUser = currentAgentType === 'coordinator';
+  const isSupervisorUser = currentAgentType?.includes('supervisor');
+  const isCommercialUser = !isAdminUser && !isCoordinatorUser && !isSupervisorUser && !!currentAgent;
+
+  const filteredMenuModules = useMemo(() => {
+    let modules = user?.role === 'admin'
+      ? menuModules
+      : currentAgent
+        ? filterMenuItems(currentAgent, menuModules)
+        : [];
+
+    if (isCommercialUser) {
+      modules = modules.map(mod => {
+        if (mod.id !== 'sales_pj') return mod;
+        return {
+          ...mod,
+          items: mod.items
+            .filter(item => {
+              if (item.url === createPageUrl("SalesPJDashboard")) return false;
+              if (item.url === createPageUrl("SalesPJAgentsDashboard")) return false;
+              return true;
+            })
+            .map(item => item)
+            .concat([])
+        };
+      });
+      modules = modules.map(mod => {
+        if (mod.id !== 'sales_pj') return mod;
+        return {
+          ...mod,
+          items: [
+            { title: "Meu Dashboard", url: createPageUrl("MyDashboardPJ"), icon: LayoutDashboard },
+            ...mod.items
+          ]
+        };
+      });
+    }
+
+    // Coordenador: tem visibilidade total e vê todos os itens dos perfis
+    // de Vendas e Supervisor (incluindo "Meu Dashboard"), sem remover
+    // os dashboards de equipe (SalesPJDashboard/SalesPJAgentsDashboard).
+    if (isCoordinatorUser) {
+      modules = modules.map(mod => {
+        if (mod.id !== 'sales_pj') return mod;
+        const myDashboardUrl = createPageUrl("MyDashboardPJ");
+        const alreadyHas = mod.items.some(i => i.url === myDashboardUrl);
+        if (alreadyHas) return mod;
+        return {
+          ...mod,
+          items: [
+            { title: "Meu Dashboard", url: myDashboardUrl, icon: LayoutDashboard },
+            ...mod.items
+          ]
+        };
+      });
+    }
+
+    return modules;
+  }, [user, currentAgent, isCommercialUser, isCoordinatorUser]);
 
   if (isPublicPage) {
     return (
@@ -809,7 +866,7 @@ function LayoutContent({ children, currentPageName }) {
                   </div>
                 ))}
                 
-                {user?.role === 'admin' && (
+                {(user?.role === 'admin' || hasAnySystemsAccess(currentAgent)) && (
                   <div className="pt-4 mt-4 border-t border-gray-200 dark:border-gray-700">
                     <button
                       onClick={() => {

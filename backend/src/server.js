@@ -12,6 +12,7 @@ import functionRoutes from './routes/functions.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import { runAllAutomations } from './services/automationService.js';
 import { syncAllAgents } from './services/googleCalendarService.js';
+import { startOutboxWorker } from './workers/gcalOutboxWorker.js';
 import { createNotification } from './services/notificationService.js';
 import { query as dbQuery } from './config/database.js';
 
@@ -102,6 +103,10 @@ initDatabase()
       syncAllAgents().catch(err => console.error('[GCal Sync] Erro na sincronização periódica:', err.message));
     }, 5 * 60 * 1000);
     console.log('[Google Calendar] Sync periódico agendado: a cada 5 minutos.');
+
+    // Phase 2.2 — Outbox worker. Drains gcal_event_outbox every 30s with
+    // exponential backoff and a Postgres advisory lock for singleton safety.
+    startOutboxWorker(30 * 1000);
 
     async function checkUpcomingActivities() {
       try {

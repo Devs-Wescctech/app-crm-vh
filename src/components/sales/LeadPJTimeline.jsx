@@ -1,4 +1,5 @@
 import React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { 
   Phone, 
   Mail, 
@@ -16,6 +17,8 @@ import {
 } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { base44 } from "@/api/base44Client";
+import { getAgentDisplayName } from "@/utils/agents";
 
 const formatDate = (dateValue) => {
   if (!dateValue) return "";
@@ -98,7 +101,14 @@ const getActivityConfig = (type) => {
   return configMap[type] || configMap.note;
 };
 
-export default function LeadPJTimeline({ activities }) {
+export default function LeadPJTimeline({ activities, agents: agentsProp }) {
+  const { data: agentsFetched = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => base44.entities.Agent.list(),
+    enabled: !agentsProp,
+  });
+  const agents = agentsProp || agentsFetched;
+
   if (!activities || activities.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16">
@@ -125,6 +135,7 @@ export default function LeadPJTimeline({ activities }) {
           const config = getActivityConfig(activity.type);
           const Icon = config.icon;
           const isCompleted = activity.completed;
+          const isNote = activity.type === 'note';
 
           return (
             <div key={activity.id || idx} className="relative flex gap-4 group">
@@ -140,14 +151,14 @@ export default function LeadPJTimeline({ activities }) {
                     <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold ${config.bg} ${config.text}`}>
                       {config.label}
                     </span>
-                    {isCompleted !== undefined && (
+                    {isCompleted !== undefined && !isNote && (
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                         isCompleted 
                           ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' 
                           : 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
                       }`}>
                         {isCompleted ? (
-                          <><CheckCircle className="w-3 h-3" /> Concluida</>
+                          <><CheckCircle className="w-3 h-3" /> Concluída</>
                         ) : (
                           <><Clock className="w-3 h-3" /> Pendente</>
                         )}
@@ -185,7 +196,7 @@ export default function LeadPJTimeline({ activities }) {
                   <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
                     <User className="w-3.5 h-3.5 text-gray-400" />
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      Responsavel: <span className="font-medium">{activity.assignedTo || activity.assigned_to}</span>
+                      Responsável: <span className="font-medium">{getAgentDisplayName(activity.assignedTo || activity.assigned_to, agents)}</span>
                     </span>
                   </div>
                 )}

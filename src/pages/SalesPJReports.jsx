@@ -22,7 +22,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { canViewAll, canViewTeam, canAccessReports } from "@/components/utils/permissions";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, canAccessReports, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import { LEAD_PJ_STAGES } from "@/constants/stages";
 
@@ -50,50 +50,45 @@ export default function SalesPJReports() {
   const { data: allAgents = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
-    initialData: [],
+    enabled: !!user,
   });
 
   const currentAgent = user?.agent;
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = user?.role === 'admin' || currentAgentType === 'admin';
-  const isSupervisor = user?.role === 'supervisor' || currentAgentType?.includes('supervisor');
+  const isAdmin = hasFullVisibility(currentAgent);
+  const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
   const hasPermission = isAdmin || isSupervisor || canAccessReports(currentAgent);
 
   const { data: leadsPJ = [] } = useQuery({
-    queryKey: ['leadsPJ-reports', isAdmin ? 'admin' : isSupervisor ? 'supervisor' : currentAgent?.id],
+    queryKey: ['leadsPJ-reports', getDataVisibilityKey(user, currentAgent)],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
-      if (isAdmin || isSupervisor) {
+      if (hasFullVisibility(currentAgent)) {
         return allLeads;
       }
 
       if (!currentAgent) return allLeads;
 
-      const canSeeAll = canViewAll(currentAgent, 'leads-pj');
-      if (canSeeAll) {
-        return allLeads;
-      }
-
-      const canSeeTeam = canViewTeam(currentAgent, 'leads-pj');
-      if (canSeeTeam) {
-        const teamAgents = allAgents.filter(a => (a.teamId || a.team_id) === (currentAgent.teamId || currentAgent.team_id));
-        const teamAgentIds = teamAgents.map(a => a.id);
-        
-        return allLeads.filter(l => teamAgentIds.includes(l.agentId || l.agent_id));
-      }
-
-      return allLeads.filter(l => (l.agentId || l.agent_id) === currentAgent.id);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      return allLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: hasPermission && !!user && (isAdmin || isSupervisor || !!currentAgent),
   });
 
+  const visibleAgents = useMemo(() => {
+    return getVisibleAgentsForFilter(currentAgent, allAgents);
+  }, [currentAgent, allAgents]);
+
+  const visibleTeamsList = useMemo(() => {
+    return getVisibleTeams(currentAgent, teams, allAgents);
+  }, [currentAgent, teams, allAgents]);
+
   const salesAgents = useMemo(() => {
-    return allAgents.filter(a => {
+    return visibleAgents.filter(a => {
       const agentType = a.agentType || a.agent_type;
       return agentType === 'sales' || agentType === 'pre_sales' || agentType === 'sales_supervisor' || agentType === 'admin';
     });
-  }, [allAgents]);
+  }, [visibleAgents]);
 
   const displayAgents = useMemo(() => {
     if (!selectedTeam) return salesAgents;
@@ -271,7 +266,7 @@ export default function SalesPJReports() {
       <DashboardFilters
         agents={displayAgents}
         stages={STAGES_PJ}
-        teams={teams}
+        teams={visibleTeamsList}
         selectedAgent={selectedAgent}
         selectedStage={selectedStage}
         selectedTeam={selectedTeam}

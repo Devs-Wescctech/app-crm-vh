@@ -7,6 +7,24 @@ export const AGENT_PERMISSIONS = {
     canManageAgents: true,
     canManageSettings: true,
   },
+  coordinator: {
+    modules: ['sales_pj'],
+    canViewAllTickets: true,
+    canViewAllLeads: true,
+    canAccessReports: true,
+    canManageAgents: true,
+    canManageSettings: false,
+  },
+  supervisor: {
+    modules: ['sales_pj'],
+    canViewAllTickets: false,
+    canViewTeamTickets: false,
+    canViewAllLeads: false,
+    canViewTeamLeads: true,
+    canAccessReports: true,
+    canManageAgents: true,
+    canManageSettings: false,
+  },
   sales_supervisor: {
     modules: ['sales_pj'],
     canViewAllTickets: false,
@@ -14,7 +32,7 @@ export const AGENT_PERMISSIONS = {
     canViewAllLeads: false,
     canViewTeamLeads: true,
     canAccessReports: true,
-    canManageAgents: false,
+    canManageAgents: true,
     canManageSettings: false,
   },
   sales: {
@@ -29,11 +47,19 @@ export const AGENT_PERMISSIONS = {
   },
 };
 
+export function isCoordinatorType(agentType) {
+  return agentType === 'coordinator';
+}
+
 export function canAccessModule(agent, moduleId) {
   const agentType = agent?.agent_type || agent?.agentType;
   if (!agent || !agentType) return false;
   
   if (agentType === 'admin') return true;
+
+  if ((agentType === 'coordinator' || isSupervisorType(agentType)) && moduleId === 'config') {
+    return true;
+  }
   
   if (agent.modules !== undefined && agent.modules !== null) {
     if (agent.modules.length === 0) return false;
@@ -92,13 +118,28 @@ export function canManageAgents(agent) {
   const agentType = agent?.agent_type || agent?.agentType;
   if (!agent || !agentType) return false;
   
-  if (agentType === 'admin') return true;
+  if (agentType === 'admin' || agentType === 'coordinator') return true;
+  if (isSupervisorType(agentType)) return true;
   
   if (agent.modules && agent.modules.length > 0) {
     if (agent.modules.includes('all') || agent.modules.includes('config')) return true;
   }
   
   if (agent.permissions?.can_manage_agents) return true;
+  
+  return false;
+}
+
+export function canManageAgentInTeam(currentAgent, agentTeamId) {
+  const agentType = currentAgent?.agent_type || currentAgent?.agentType;
+  if (!currentAgent || !agentType) return false;
+  
+  if (agentType === 'admin' || agentType === 'coordinator') return true;
+  
+  if (isSupervisorType(agentType)) {
+    const myTeamId = currentAgent.teamId || currentAgent.team_id;
+    return agentTeamId === myTeamId;
+  }
   
   return false;
 }
@@ -118,8 +159,168 @@ export function canManageSettings(agent) {
   return false;
 }
 
+export const SYSTEMS_PERMISSION_KEYS = [
+  'SystemsSalesFields',
+  'SystemsGoogleCalendar',
+  'SystemsAutentique',
+];
+
+export function canAccessSystemsItem(agent, key) {
+  const agentType = agent?.agent_type || agent?.agentType;
+  if (!agent) return false;
+  if (agentType === 'admin') return true;
+  if (Array.isArray(agent.modules) && agent.modules.includes('all')) return true;
+  const allowed = agent.allowedSubmenus || agent.allowed_submenus || [];
+  return allowed.includes(key);
+}
+
+export function hasAnySystemsAccess(agent) {
+  const agentType = agent?.agent_type || agent?.agentType;
+  if (!agent) return false;
+  if (agentType === 'admin') return true;
+  return SYSTEMS_PERMISSION_KEYS.some(k => canAccessSystemsItem(agent, k));
+}
+
 export function isSupervisorType(agentType) {
-  return agentType === 'sales_supervisor' || agentType?.endsWith('_supervisor');
+  return agentType === 'supervisor' || agentType === 'sales_supervisor' || agentType?.endsWith('_supervisor');
+}
+
+export function hasFullVisibility(agent) {
+  const agentType = agent?.agent_type || agent?.agentType;
+  if (!agentType) return false;
+  if (agentType === 'admin' || agentType === 'coordinator') return true;
+  if (canViewAll(agent, 'leads-pj')) return true;
+  return false;
+}
+
+export function hasTeamVisibility(agent) {
+  const agentType = agent?.agent_type || agent?.agentType;
+  if (!agentType) return false;
+  if (agentType === 'admin') return true;
+  if (isSupervisorType(agentType)) return true;
+  if (canViewTeam(agent, 'leads-pj')) return true;
+  return false;
+}
+
+export function getVisibleAgentIds(currentAgent, allAgents) {
+  if (!currentAgent) return [];
+
+  if (hasFullVisibility(currentAgent)) {
+    return allAgents.map(a => a.id);
+  }
+
+  const agentType = currentAgent?.agent_type || currentAgent?.agentType;
+  if (isSupervisorType(agentType)) {
+    const ids = allAgents
+      .filter(a => (a.supervisorId || a.supervisor_id) === currentAgent.id)
+      .map(a => a.id);
+    if (!ids.includes(currentAgent.id)) {
+      ids.push(currentAgent.id);
+    }
+    return ids;
+  }
+
+  if (hasTeamVisibility(currentAgent)) {
+    const teamId = currentAgent.teamId || currentAgent.team_id;
+    if (!teamId) return [currentAgent.id];
+    const ids = allAgents
+      .filter(a => (a.teamId || a.team_id) === teamId)
+      .map(a => a.id);
+    if (!ids.includes(currentAgent.id)) {
+      ids.push(currentAgent.id);
+    }
+    return ids;
+  }
+
+  return [currentAgent.id];
+}
+
+export function getVisibleTeams(currentAgent, allTeams, allAgents) {
+  if (!currentAgent) return [];
+
+  if (hasFullVisibility(currentAgent)) {
+    return allTeams;
+  }
+
+  const agentType = currentAgent?.agent_type || currentAgent?.agentType;
+  if (isSupervisorType(agentType) && allAgents) {
+    const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+    const teamIds = new Set();
+    allAgents
+      .filter(a => visibleIds.includes(a.id))
+      .forEach(a => {
+        const tid = a.teamId || a.team_id;
+        if (tid) teamIds.add(tid);
+      });
+    return allTeams.filter(t => teamIds.has(t.id));
+  }
+
+  if (hasTeamVisibility(currentAgent)) {
+    const teamId = currentAgent.teamId || currentAgent.team_id;
+    return allTeams.filter(t => t.id === teamId);
+  }
+
+  return [];
+}
+
+export function getVisibleAgentsForFilter(currentAgent, allAgents) {
+  if (!currentAgent) return [];
+
+  if (hasFullVisibility(currentAgent)) {
+    return allAgents;
+  }
+
+  const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+  return allAgents.filter(a => visibleIds.includes(a.id));
+}
+
+export function canManageTeam(currentAgent, teamId, allTeams) {
+  const agentType = currentAgent?.agent_type || currentAgent?.agentType;
+  if (!currentAgent || !agentType) return false;
+
+  if (agentType === 'admin') return true;
+
+  if (agentType === 'coordinator') {
+    if (!teamId || !allTeams) return true;
+    const team = allTeams.find(t => t.id === teamId);
+    if (!team) return true;
+    return team.coordinator_id === currentAgent.id || team.coordinatorId === currentAgent.id;
+  }
+
+  if (isSupervisorType(agentType)) {
+    const myTeamId = currentAgent.teamId || currentAgent.team_id;
+    return teamId === myTeamId;
+  }
+
+  return false;
+}
+
+export function getManagedTeams(currentAgent, allTeams) {
+  const agentType = currentAgent?.agent_type || currentAgent?.agentType;
+  if (!currentAgent || !agentType) return [];
+
+  if (agentType === 'admin') return allTeams;
+
+  if (agentType === 'coordinator') {
+    return allTeams.filter(t => t.coordinator_id === currentAgent.id || t.coordinatorId === currentAgent.id);
+  }
+
+  if (isSupervisorType(agentType)) {
+    const myTeamId = currentAgent.teamId || currentAgent.team_id;
+    return allTeams.filter(t => t.id === myTeamId);
+  }
+
+  return [];
+}
+
+export function getDataVisibilityKey(user, currentAgent) {
+  if (!user) return 'none';
+  if (hasFullVisibility(currentAgent)) return 'admin';
+  if (hasTeamVisibility(currentAgent)) {
+    const teamId = currentAgent?.teamId || currentAgent?.team_id;
+    return `supervisor-${teamId || 'no-team'}`;
+  }
+  return currentAgent?.id || 'none';
 }
 
 export function filterMenuItems(agent, menuItems) {
@@ -163,7 +364,7 @@ export function filterMenuItems(agent, menuItems) {
           return false;
         }
         
-        if (subItem.supervisorOnly && !isSupervisor) {
+        if (subItem.supervisorOnly && !isSupervisor && agentType !== 'coordinator') {
           return false;
         }
         

@@ -36,7 +36,7 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { createPageUrl } from "@/utils";
-import { canViewAll, canViewTeam } from "@/components/utils/permissions";
+import { getVisibleAgentsForFilter, getVisibleAgentIds, hasFullVisibility } from "@/components/utils/permissions";
 
 const STAGES_PJ = [
   { value: 'novo', label: 'Novo', color: 'bg-blue-100 text-blue-800' },
@@ -71,36 +71,23 @@ export default function LeadPJSearch() {
   });
 
   const currentAgent = user?.agent || allAgents.find(a => a.userEmail === user?.email || a.user_email === user?.email);
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = user?.role === 'admin' || currentAgentType === 'admin';
-  const isSupervisor = user?.role === 'supervisor' || currentAgentType?.includes('supervisor');
+  const isAdmin = hasFullVisibility(currentAgent);
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leadsPJ', isAdmin ? 'admin' : isSupervisor ? 'supervisor' : currentAgent?.id],
+    queryKey: ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id, allAgents.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
-      if (isAdmin || isSupervisor) {
+      if (isAdmin) {
         return allLeads;
       }
 
-      if (!currentAgent) return allLeads;
+      if (!currentAgent) return [];
 
-      const canSeeAll = canViewAll(currentAgent, 'leads');
-      if (canSeeAll) {
-        return allLeads;
-      }
-
-      const canSeeTeam = canViewTeam(currentAgent, 'leads');
-      if (canSeeTeam) {
-        const teamAgents = allAgents.filter(a => (a.teamId || a.team_id) === (currentAgent.teamId || currentAgent.team_id));
-        const teamAgentIds = teamAgents.map(a => a.id);
-        return allLeads.filter(l => teamAgentIds.includes(l.agentId || l.agent_id));
-      }
-
-      return allLeads.filter(l => (l.agentId || l.agent_id) === currentAgent.id);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      return allLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
-    enabled: !!user && !!currentAgent,
+    enabled: !!user && !!currentAgent && allAgents.length > 0,
   });
 
   const normalizeString = (str) => {
@@ -404,7 +391,7 @@ export default function LeadPJSearch() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os agentes</SelectItem>
-                    {allAgents.map(agent => (
+                    {getVisibleAgentsForFilter(currentAgent, allAgents).map(agent => (
                       <SelectItem key={agent.id} value={agent.id}>
                         {agent.name || agent.fullName || agent.full_name || agent.userEmail || agent.user_email}
                       </SelectItem>

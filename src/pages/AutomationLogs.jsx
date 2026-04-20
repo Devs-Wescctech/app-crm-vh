@@ -55,7 +55,7 @@ export default function AutomationLogs() {
       if (filters.status !== 'all') params.append('status', filters.status);
       
       const response = await fetch(`/api/whatsapp/automation-logs?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
       });
       return response.json();
     },
@@ -66,7 +66,7 @@ export default function AutomationLogs() {
     mutationFn: async () => {
       const response = await fetch('/api/whatsapp/run-automations', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
       });
       if (!response.ok) throw new Error('Falha ao executar automações');
       return response.json();
@@ -87,7 +87,7 @@ export default function AutomationLogs() {
         : '';
       const response = await fetch(`/api/whatsapp/automation-logs${params}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
       });
       if (!response.ok) throw new Error('Falha ao limpar logs');
       return response.json();

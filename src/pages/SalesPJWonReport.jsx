@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { canViewAll, canViewTeam } from "@/components/utils/permissions.jsx";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions.jsx";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 
 const createPageUrl = (pageName) => `/${pageName}`;
@@ -51,8 +51,7 @@ export default function SalesPJWonReport() {
   });
 
   const currentAgent = user?.agent;
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = currentAgentType === 'admin' || currentAgentType === 'supervisor' || currentAgentType === 'sales_supervisor';
+  const isAdmin = hasFullVisibility(currentAgent);
   const hasPermission = !!user;
 
   const { data: teams = [] } = useQuery({
@@ -67,22 +66,16 @@ export default function SalesPJWonReport() {
   });
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leads-pj-won-report', isAdmin ? 'admin' : currentAgent?.id, allAgents.length],
+    queryKey: ['leads-pj-won-report', getDataVisibilityKey(user, currentAgent), allAgents.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate', 10000);
       const wonLeads = allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
 
       if (isAdmin) return wonLeads;
       if (!currentAgent) return [];
-      if (canViewAll(currentAgent, 'leads-pj')) return wonLeads;
 
-      if (canViewTeam(currentAgent, 'leads-pj')) {
-        const teamAgents = allAgents.filter(a => (a.teamId || a.team_id) === (currentAgent?.teamId || currentAgent?.team_id));
-        const teamAgentIds = teamAgents.map(a => a.id);
-        return wonLeads.filter(l => teamAgentIds.includes(l.agentId || l.agent_id));
-      }
-
-      return wonLeads.filter(l => (l.agentId || l.agent_id) === currentAgent?.id);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      return wonLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: !!user && hasPermission && allAgents.length > 0,
   });
@@ -111,10 +104,18 @@ export default function SalesPJWonReport() {
     return [...s].sort();
   }, [leadsPJ]);
 
+  const visibleAgents = useMemo(() => {
+    return getVisibleAgentsForFilter(currentAgent, allAgents);
+  }, [currentAgent, allAgents]);
+
+  const visibleTeamsList = useMemo(() => {
+    return getVisibleTeams(currentAgent, teams, allAgents);
+  }, [currentAgent, teams, allAgents]);
+
   const displayAgents = useMemo(() => {
-    if (!selectedTeam) return allAgents;
-    return allAgents.filter(a => String(a.teamId || a.team_id) === String(selectedTeam));
-  }, [allAgents, selectedTeam]);
+    if (!selectedTeam) return visibleAgents;
+    return visibleAgents.filter(a => String(a.teamId || a.team_id) === String(selectedTeam));
+  }, [visibleAgents, selectedTeam]);
 
   const filteredLeads = useMemo(() => {
     return leadsPJ.filter(lead => {
@@ -260,7 +261,7 @@ export default function SalesPJWonReport() {
       <DashboardFilters
         agents={displayAgents}
         stages={[]}
-        teams={teams}
+        teams={visibleTeamsList}
         selectedAgent={selectedAgent}
         selectedStage={null}
         selectedTeam={selectedTeam}

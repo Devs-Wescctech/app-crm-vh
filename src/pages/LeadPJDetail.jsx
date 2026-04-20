@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { useNavigate } from "react-router-dom";
@@ -64,12 +65,12 @@ const STAGES_PJ = [
 ];
 
 const DEFAULT_INTEREST_OPTIONS_PJ = [
-  "Plano Funeral Empresarial",
-  "Plano de Saúde Corporativo",
-  "Seguro Empresarial",
-  "Telemedicina Corporativa",
-  "Assistência 24h",
-  "Múltiplos Planos",
+  "Consultoria",
+  "Software / SaaS",
+  "Serviço Recorrente",
+  "Projeto Sob Demanda",
+  "Treinamento",
+  "Suporte Técnico",
   "Outro",
 ];
 
@@ -84,10 +85,25 @@ export default function LeadPJDetail() {
   const [hasChanges, setHasChanges] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [newTask, setNewTask] = useState({ title: "", scheduledAt: "" });
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmLabel: '', variant: 'default', onConfirm: null });
   const [showLostDialog, setShowLostDialog] = useState(false);
   const [lostReason, setLostReason] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [generatingProposal, setGeneratingProposal] = useState(false);
+  const [activeTab, setActiveTab] = useState('activities');
+  const tasksSectionRef = useRef(null);
+
+  const handleViewTasksClick = () => {
+    setActiveTab('tasks');
+    setTimeout(() => {
+      if (tasksSectionRef.current) {
+        tasksSectionRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      }
+    }, 50);
+  };
   const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [proposalUrl, setProposalUrl] = useState("");
@@ -124,7 +140,7 @@ export default function LeadPJDetail() {
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
-    initialData: [],
+    enabled: !!user,
   });
 
   const { data: activities = [] } = useQuery({
@@ -309,7 +325,6 @@ export default function LeadPJDetail() {
       title: 'Nota adicionada',
       description: newNote,
       assigned_to: leadAgentId,
-      completed: true,
     });
   };
 
@@ -546,13 +561,14 @@ export default function LeadPJDetail() {
   const currentAgent = user?.agent;
   const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
   const isAdmin = user?.role === 'admin' || currentAgentType === 'admin';
+  const isCoordinator = currentAgentType === 'coordinator';
   const isSupervisor = user?.role === 'supervisor' || currentAgentType?.includes('supervisor');
   
   const isOwnLead = currentAgent && String(leadAgentId) === String(currentAgent.id);
   const isTeamLead = isSupervisor && currentAgent?.teamId && 
     agents.some(a => String(a.id) === String(leadAgentId) && String(a.teamId) === String(currentAgent.teamId));
   
-  if (user && !isAdmin && !isSupervisor && !isOwnLead && !isTeamLead) {
+  if (user && !isAdmin && !isCoordinator && !isSupervisor && !isOwnLead && !isTeamLead) {
     const leadAgent = agents.find(a => String(a.id) === String(leadAgentId));
     
     return (
@@ -683,9 +699,14 @@ export default function LeadPJDetail() {
               {(lead.stage === 'fechado_ganho' || lead.stage === 'negociacao') && !lead.concluded && (
                 <Button
                   onClick={() => {
-                    if (confirm('Confirma a conclusão desta venda B2B?\n\nEste lead sairá do pipeline de vendas.')) {
-                      concludeSaleMutation.mutate();
-                    }
+                    setConfirmDialog({
+                      isOpen: true,
+                      title: 'Concluir venda',
+                      message: 'Confirma a conclusão desta venda B2B? Este lead sairá do pipeline de vendas.',
+                      confirmLabel: 'Concluir',
+                      variant: 'default',
+                      onConfirm: () => { concludeSaleMutation.mutate(); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+                    });
                   }}
                   disabled={concludeSaleMutation.isPending}
                   size="sm"
@@ -830,7 +851,7 @@ export default function LeadPJDetail() {
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10">
                 <p className="text-white/70 text-xs uppercase tracking-wide">Funcionários</p>
                 <p className="text-lg font-semibold text-white">
-                  {lead.employee_count || lead.employeeCount || "N/D"}
+                  {lead.employee_count || lead.employeeCount || lead.num_employees || lead.numEmployees || "Não Informado"}
                 </p>
               </div>
             </div>
@@ -856,7 +877,7 @@ export default function LeadPJDetail() {
                 size="sm"
                 variant="outline"
                 className="border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300"
-                onClick={() => document.querySelector('[data-value="tasks"]')?.click()}
+                onClick={handleViewTasksClick}
               >
                 Ver Tarefas
               </Button>
@@ -880,7 +901,7 @@ export default function LeadPJDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* COLUNA ESQUERDA: TABS (2/3) */}
           <div className="lg:col-span-2">
-            <Tabs defaultValue="activities" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-1">
                 <TabsTrigger value="activities" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
                   <Activity className="w-4 h-4 mr-2" />
@@ -941,6 +962,7 @@ export default function LeadPJDetail() {
               </TabsContent>
 
               <TabsContent value="tasks" className="mt-6">
+                <div ref={tasksSectionRef} style={{ scrollMarginTop: '80px' }}>
                 <Card className="bg-white dark:bg-gray-900">
                   <CardHeader className="border-b border-gray-200 dark:border-gray-700">
                     <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
@@ -1056,6 +1078,7 @@ export default function LeadPJDetail() {
                     </div>
                   </CardContent>
                 </Card>
+                </div>
               </TabsContent>
 
               <TabsContent value="proposal" className="mt-6">
@@ -1695,6 +1718,17 @@ export default function LeadPJDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel="Cancelar"
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

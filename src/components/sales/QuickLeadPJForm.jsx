@@ -11,23 +11,24 @@ import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const DEFAULT_INTEREST_OPTIONS_PJ = [
-  "Plano Funeral Empresarial",
-  "Plano de Saúde Corporativo",
-  "Seguro Empresarial",
-  "Telemedicina Corporativa",
-  "Assistência 24h",
-  "Múltiplos Planos",
+  "Consultoria",
+  "Software / SaaS",
+  "Serviço Recorrente",
+  "Projeto Sob Demanda",
+  "Treinamento",
+  "Suporte Técnico",
   "Outro",
 ];
 
 const DEFAULT_SOURCE_OPTIONS_PJ = [
+  "Prospecção Ativa",
   "Indicação",
   "Site",
   "LinkedIn",
   "Google Ads",
-  "Cold Call",
-  "Evento",
+  "Evento / Feira",
   "Parceiro",
+  "Inbound Marketing",
   "Outro",
 ];
 

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -35,7 +36,9 @@ import {
   ChevronRight,
   User,
   Calendar,
-  Trophy
+  Trophy,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -47,7 +50,7 @@ import QuickLeadPJForm from "../components/sales/QuickLeadPJForm";
 import { createPageUrl } from "@/utils";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { canViewAll, canViewTeam } from "@/components/utils/permissions";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
 import {
   DndContext,
   DragOverlay,
@@ -203,7 +206,7 @@ function DroppableColumnPJ({ id, stage, children, overId, activeId }) {
   );
 }
 
-function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover }) {
+function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost }) {
   const {
     attributes,
     listeners,
@@ -321,7 +324,7 @@ function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigat
                   if (stage.id === 'fechado_ganho') {
                     updateLeadMutation.mutate({ id: lead.id, data: { concluded: true } });
                   } else {
-                    updateLeadMutation.mutate({ id: lead.id, data: { lost: true } });
+                    onMarkLost?.(lead.id);
                   }
                 }}
               >
@@ -393,6 +396,26 @@ export default function LeadsPJKanban() {
   const queryClient = useQueryClient();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [showClosedLeads, setShowClosedLeads] = useState(() => {
+    try {
+      return localStorage.getItem('leadsPJKanbanShowClosed') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('leadsPJKanbanShowClosed', String(showClosedLeads));
+    } catch (e) {}
+  }, [showClosedLeads]);
+
+  const displayStages = useMemo(
+    () => showClosedLeads
+      ? STAGES_PJ
+      : STAGES_PJ.filter(s => s.id !== 'fechado_ganho' && s.id !== 'fechado_perdido'),
+    [showClosedLeads]
+  );
   const [viewMode, setViewMode] = useState('kanban');
   const [filters, setFilters] = useState(() => {
     const saved = localStorage.getItem('leadsPJKanbanFilters');
@@ -419,6 +442,9 @@ export default function LeadsPJKanban() {
   const hasActiveFilters = filters.search || filters.agent !== 'all' || filters.team !== 'all' || filters.porte !== 'all' || filters.dateFrom || filters.dateTo;
   const [listPage, setListPage] = useState(1);
   const [isDraggingCard, setIsDraggingCard] = useState(false);
+  const [lostReasonDialog, setLostReasonDialog] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmLabel: '', variant: 'default', onConfirm: null });
+  const [lostReasonText, setLostReasonText] = useState('');
 
   // Refs para arrastar o kanban horizontalmente
   const kanbanContainerRef = useRef(null);
@@ -523,42 +549,29 @@ export default function LeadsPJKanban() {
   });
 
   const currentAgent = user?.agent || allAgents.find(a => a.userEmail === user?.email || a.user_email === user?.email);
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = currentAgentType === 'admin' || currentAgentType === 'supervisor' || currentAgentType === 'sales_supervisor';
+  const isAdmin = hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent);
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id],
+    queryKey: ['leadsPJ', getDataVisibilityKey(user, currentAgent), allAgents.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-created_at');
       
-      if (isAdmin) {
-        return allLeads.filter(l => !l.lost && !l.concluded);
+      if (hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent)) {
+        const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+        return allLeads.filter(l =>
+          !l.lost && !l.concluded &&
+          (hasFullVisibility(currentAgent) || visibleIds.includes(l.agentId) || visibleIds.includes(l.agent_id))
+        );
       }
 
       if (!currentAgent) return [];
-
-      const canSeeAll = canViewAll(currentAgent, 'leads-pj');
-      if (canSeeAll) {
-        return allLeads.filter(l => !l.lost && !l.concluded);
-      }
-
-      const canSeeTeam = canViewTeam(currentAgent, 'leads-pj');
-      if (canSeeTeam) {
-        const teamAgents = allAgents.filter(a => a.team_id === currentAgent.team_id);
-        const teamAgentIds = teamAgents.map(a => a.id);
-
-        return allLeads.filter(l =>
-          !l.lost && !l.concluded &&
-          (teamAgentIds.includes(l.agentId) || teamAgentIds.includes(l.agent_id))
-        );
-      }
 
       return allLeads.filter(l =>
         !l.lost && !l.concluded &&
         (l.agentId === currentAgent.id || l.agent_id === currentAgent.id)
       );
     },
-    enabled: !!user && (isAdmin || !!currentAgent),
+    enabled: !!user && !isLoadingAgents && (isAdmin || !!currentAgent),
     staleTime: 10000,
     refetchInterval: 15000,
   });
@@ -580,7 +593,13 @@ export default function LeadsPJKanban() {
     }
   }, [leadsPJ]);
 
-  const salesAgents = allAgents;
+  const salesAgents = useMemo(() => {
+    return getVisibleAgentsForFilter(currentAgent, allAgents);
+  }, [currentAgent, allAgents]);
+
+  const visibleTeamsList = useMemo(() => {
+    return getVisibleTeams(currentAgent, teams, allAgents);
+  }, [currentAgent, teams, allAgents]);
 
   const { data: allActivitiesPJ = [] } = useQuery({
     queryKey: ['allActivitiesPJ'],
@@ -662,6 +681,12 @@ export default function LeadsPJKanban() {
 
     const currentStage = fromStage || lead.stage;
     if (currentStage === newStage) return;
+
+    if (newStage === 'fechado_perdido') {
+      setLostReasonDialog({ leadId, fromStage: currentStage });
+      setLostReasonText('');
+      return;
+    }
 
     const stageHistory = [...(lead.stageHistory || lead.stage_history || [])];
     stageHistory.push({
@@ -997,9 +1022,14 @@ export default function LeadsPJKanban() {
                         className="h-7 w-7 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-700 dark:hover:text-red-400"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm('Deseja excluir esta tarefa?')) {
-                            deleteTaskMutation.mutate({ taskId: task.id });
-                          }
+                          setConfirmDialog({
+                            isOpen: true,
+                            title: 'Excluir tarefa',
+                            message: 'Tem certeza que deseja excluir esta tarefa?',
+                            confirmLabel: 'Excluir',
+                            variant: 'danger',
+                            onConfirm: () => { deleteTaskMutation.mutate({ taskId: task.id }); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+                          });
                         }}
                         disabled={deleteTaskMutation.isPending}
                         title="Excluir tarefa"
@@ -1052,6 +1082,22 @@ export default function LeadsPJKanban() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="glass"
+              onClick={() => setShowClosedLeads(prev => !prev)}
+              className={`flex-1 sm:flex-none ${showClosedLeads ? 'ring-2 ring-emerald-500/50' : ''}`}
+              size="sm"
+              title={showClosedLeads ? 'Ocultar leads finalizados' : 'Mostrar leads finalizados'}
+            >
+              {showClosedLeads ? (
+                <Eye className="w-4 h-4 sm:mr-2" />
+              ) : (
+                <EyeOff className="w-4 h-4 sm:mr-2" />
+              )}
+              <span className="hidden sm:inline">
+                {showClosedLeads ? 'Ocultar Finalizados' : 'Mostrar Finalizados'}
+              </span>
+            </Button>
             <Button
               variant="glass"
               onClick={() => setShowFilters(!showFilters)}
@@ -1111,7 +1157,7 @@ export default function LeadsPJKanban() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">Todos os times</SelectItem>
-                          {teams.map(team => (
+                          {visibleTeamsList.map(team => (
                             <SelectItem key={team.id} value={String(team.id)}>{team.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1283,7 +1329,7 @@ export default function LeadsPJKanban() {
               }}
             >
               <div className="flex gap-4" style={{ minWidth: 'max-content' }}>
-                {STAGES_PJ.map((stage) => {
+                {displayStages.map((stage) => {
                   const stageLeads = getOrderedLeadsByStage(stage.id);
                   const stageValue = stageLeads.reduce((sum, lead) => sum + getLeadValue(lead), 0);
                   return (
@@ -1341,7 +1387,7 @@ export default function LeadsPJKanban() {
                 }}
               >
                 <div className="flex gap-4" style={{ minWidth: 'max-content' }}>
-                  {STAGES_PJ.map((stage) => {
+                  {displayStages.map((stage) => {
                     const stageLeads = getOrderedLeadsByStage(stage.id);
 
                     return (
@@ -1366,7 +1412,10 @@ export default function LeadsPJKanban() {
                                 formatDate={formatDate}
                                 updateLeadMutation={updateLeadMutation}
                                 TasksPopover={TasksPopover}
-
+                                onMarkLost={(leadId) => {
+                                  setLostReasonDialog({ leadId, fromStage: lead.stage, isDarBaixa: true });
+                                  setLostReasonText('');
+                                }}
                               />
                             );
                           })}
@@ -1552,7 +1601,77 @@ export default function LeadsPJKanban() {
             />
           </DialogContent>
         </Dialog>
+        <Dialog open={!!lostReasonDialog} onOpenChange={(open) => { if (!open) setLostReasonDialog(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="w-5 h-5" />
+                Motivo da Perda
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Informe o motivo pelo qual este lead foi perdido:
+              </p>
+              <textarea
+                className="w-full min-h-[100px] p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder="Ex: Preço acima do orçamento, escolheu concorrente, sem resposta..."
+                value={lostReasonText}
+                onChange={(e) => setLostReasonText(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setLostReasonDialog(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  disabled={!lostReasonText.trim()}
+                  onClick={() => {
+                    if (!lostReasonDialog) return;
+                    const { leadId, fromStage, isDarBaixa } = lostReasonDialog;
+                    const lead = leadsPJ.find(l => String(l.id) === String(leadId));
+
+                    const stageHistory = [...(lead?.stageHistory || lead?.stage_history || [])];
+                    if (fromStage) {
+                      stageHistory.push({
+                        from: fromStage,
+                        to: 'fechado_perdido',
+                        changedAt: new Date().toISOString(),
+                        changedBy: user?.email,
+                      });
+                    }
+
+                    const updateData = {
+                      stage: 'fechado_perdido',
+                      stageHistory,
+                      lostReason: lostReasonText.trim(),
+                      lost: true,
+                    };
+
+                    updateLeadMutation.mutate({ id: leadId, data: updateData });
+                    toast.success('Lead marcado como perdido');
+                    setLostReasonDialog(null);
+                    setLostReasonText('');
+                  }}
+                >
+                  Confirmar Perda
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel="Cancelar"
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </motion.div>
   );
 }

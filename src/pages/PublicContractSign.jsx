@@ -174,7 +174,7 @@ export default function PublicContractSign() {
               <Building2 className="w-12 h-12 text-blue-600" />
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">SalesTwo</h1>
-                <p className="text-gray-600">Plano Funeral</p>
+                <p className="text-gray-600">Vendas B2B</p>
               </div>
             </div>
             <Badge className="bg-blue-600 text-white px-6 py-2 text-lg">

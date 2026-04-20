@@ -1,5 +1,6 @@
 export const AGENT_TYPES = {
   ADMIN: 'admin',
+  COORDINATOR: 'coordinator',
   SUPERVISOR: 'supervisor',
   SUPPORT: 'support',
   SALES: 'sales',
@@ -56,13 +57,24 @@ export const ROLE_PERMISSIONS = {
     canManageSettings: true,
     canAccessReports: true
   },
+  [AGENT_TYPES.COORDINATOR]: {
+    modules: [MODULES.DASHBOARD, MODULES.SUPPORT, MODULES.SALES, MODULES.PRE_SALES, MODULES.POST_SALES, MODULES.COLLECTION, MODULES.QUALITY, MODULES.REPORTS, MODULES.REFERRALS],
+    canViewAllTickets: true,
+    canViewTeamTickets: true,
+    canViewAllLeads: true,
+    canViewTeamLeads: true,
+    canManageAgents: true,
+    canManageSettings: false,
+    canAccessReports: true
+  },
   [AGENT_TYPES.SUPERVISOR]: {
-    modules: [MODULES.DASHBOARD, MODULES.SUPPORT, MODULES.SALES, MODULES.PRE_SALES, MODULES.POST_SALES, MODULES.COLLECTION, MODULES.QUALITY, MODULES.REPORTS],
+    modules: [MODULES.DASHBOARD, MODULES.SALES, MODULES.REPORTS],
     canViewAllTickets: false,
     canViewTeamTickets: true,
     canViewAllLeads: false,
     canViewTeamLeads: true,
-    canManageAgents: false,
+    canManageAgents: true,
+    canManageTeams: false,
     canManageSettings: false,
     canAccessReports: true
   },
@@ -125,6 +137,23 @@ export function getPermissions(agentType) {
 export function canAccessModule(agentType, module) {
   const permissions = getPermissions(agentType);
   return permissions.modules.includes(module);
+}
+
+export function getDataScope(agent) {
+  if (!agent) return { type: 'own', teamId: null, agentId: null };
+
+  const agentType = agent.agent_type || agent.agentType;
+  const permissions = getPermissions(agentType);
+
+  if (permissions.canViewAllLeads) {
+    return { type: 'all', teamId: null, agentId: null };
+  }
+
+  if ((permissions.canViewTeamLeads || permissions.canViewTeamTickets) && (agent.team_id || agent.teamId)) {
+    return { type: 'team', teamId: agent.team_id || agent.teamId, agentId: agent.id };
+  }
+
+  return { type: 'own', teamId: null, agentId: agent.id };
 }
 
 export function getVisibilityFilter(agentType, userId, teamId, entity) {
