@@ -139,10 +139,12 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
   const [options, setOptions] = useState([]);
   const [newOption, setNewOption] = useState("");
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const lastSyncedJsonRef = useRef(null);
 
   useEffect(() => {
     if (lastSyncedJsonRef.current === savedJson) return;
+    if (dirty) return;
     lastSyncedJsonRef.current = savedJson;
     let parsed = [];
     if (savedJson) {
@@ -152,7 +154,7 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
       } catch {}
     }
     setOptions(parsed);
-  }, [savedJson]);
+  }, [savedJson, dirty]);
 
   const handleAdd = () => {
     const trimmed = newOption.trim();
@@ -163,10 +165,12 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     }
     setOptions([...options, trimmed]);
     setNewOption("");
+    setDirty(true);
   };
 
   const handleRemove = (index) => {
     setOptions(options.filter((_, i) => i !== index));
+    setDirty(true);
   };
 
   const handleSave = async () => {
@@ -193,6 +197,7 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
         value: JSON.stringify(toSave),
         type: 'json',
       });
+      setDirty(false);
     } catch (error) {
       // erro já é tratado pelo onError da mutation
     }
