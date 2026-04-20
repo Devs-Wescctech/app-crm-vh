@@ -24,7 +24,7 @@ import { createPageUrl } from "@/utils";
 import StatsCard from "@/components/dashboard/StatsCard";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
 import MetricsHelpDialog from "@/components/dashboard/MetricsHelpDialog";
-import { canViewAll, canViewTeam } from "@/components/utils/permissions.jsx";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions.jsx";
 import { isWithinInterval, parseISO, startOfDay, endOfDay } from "date-fns";
 import { LEAD_PJ_STAGES, isActiveStage, isWonStage, isLostStage } from "@/constants/stages";
 
@@ -58,36 +58,28 @@ export default function SalesPJDashboard() {
   const { data: allAgents = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
-    initialData: [],
+    enabled: !!user,
   });
 
   const currentAgent = user?.agent;
-  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = user?.role === 'admin' || currentAgentType === 'admin';
-  const isSupervisor = user?.role === 'supervisor' || currentAgentType?.includes('supervisor');
+  const isAdmin = hasFullVisibility(currentAgent);
+  const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
 
   const { data: rawLeads = [] } = useQuery({
-    queryKey: ['leads-pj-dashboard', isAdmin ? 'admin' : isSupervisor ? 'supervisor' : currentAgent?.id],
+    queryKey: ['leads-pj-dashboard', getDataVisibilityKey(user, currentAgent)],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
-      if (isAdmin || isSupervisor) {
+      if (hasFullVisibility(currentAgent)) {
         return allLeads;
       }
       
       if (!currentAgent) return [];
       
-      const canSeeAll = canViewAll(currentAgent, 'leads-pj');
-      if (canSeeAll) {
-        return allLeads;
-      }
-      
-      const canSeeTeam = canViewTeam(currentAgent, 'leads-pj');
-      if (canSeeTeam) {
-        const teamAgents = allAgents.filter(a => (a.teamId || a.team_id) === (currentAgent.teamId || currentAgent.team_id));
-        const teamAgentIds = teamAgents.map(a => a.id);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      if (hasTeamVisibility(currentAgent)) {
         return allLeads.filter(l => 
-          teamAgentIds.includes(l.agentId || l.agent_id)
+          visibleIds.includes(l.agentId || l.agent_id)
         );
       }
       
@@ -111,14 +103,22 @@ export default function SalesPJDashboard() {
     initialData: [],
   });
 
+  const visibleAgents = useMemo(() => {
+    return getVisibleAgentsForFilter(currentAgent, agents);
+  }, [currentAgent, agents]);
+
+  const visibleTeamsList = useMemo(() => {
+    return getVisibleTeams(currentAgent, teams, allAgents);
+  }, [currentAgent, teams, allAgents]);
+
   const displayAgents = useMemo(() => {
-    const salesFiltered = agents.filter(a => {
+    const salesFiltered = visibleAgents.filter(a => {
       const agentType = a.agentType || a.agent_type;
       return agentType?.includes('sales') || agentType?.includes('vendas') || agentType === 'admin' || agentType?.includes('supervisor');
     });
     if (!selectedTeam) return salesFiltered;
     return salesFiltered.filter(a => String(a.teamId || a.team_id) === String(selectedTeam));
-  }, [agents, selectedTeam]);
+  }, [visibleAgents, selectedTeam]);
 
   const leads = useMemo(() => {
     let filtered = [...rawLeads];
@@ -185,7 +185,11 @@ export default function SalesPJDashboard() {
   const ticketMedio = vendas > 0 ? (receitaTotal / vendas).toFixed(2) : 0;
   const atividadesPendentes = activities.filter(a => !a.completed && a.type === 'task').length;
 
-  const topAgents = agents
+  const topAgents = visibleAgents
+    .filter(a => {
+      const at = a.agentType || a.agent_type;
+      return at === 'sales';
+    })
     .map(agent => {
       const agentLeads = leads.filter(l => (l.agentId || l.agent_id) === agent.id);
       const agentVendas = agentLeads.filter(l => l.stage === 'fechado_ganho').length;
@@ -240,7 +244,7 @@ export default function SalesPJDashboard() {
         <DashboardFilters
           agents={displayAgents}
           stages={STAGES_PJ}
-          teams={teams}
+          teams={visibleTeamsList}
           selectedAgent={selectedAgent}
           selectedStage={selectedStage}
           selectedTeam={selectedTeam}
@@ -252,8 +256,8 @@ export default function SalesPJDashboard() {
           onPeriodChange={setSelectedPeriod}
           onDateRangeChange={setDateRange}
           onClearFilters={handleClearFilters}
-          showAgentFilter={isAdmin || isSupervisor}
-          showTeamFilter={isAdmin || isSupervisor}
+          showAgentFilter={hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent)}
+          showTeamFilter={hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent)}
         />
       </motion.div>
 

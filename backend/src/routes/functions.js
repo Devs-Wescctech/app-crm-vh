@@ -32,6 +32,9 @@ import {
   getConnectedAgentIds,
   syncGoogleToSalesTwo,
   syncAllAgents,
+  listWritableCalendars,
+  setTargetCalendar,
+  getTargetCalendarForAgent,
 } from '../services/googleCalendarService.js';
 
 const router = Router();
@@ -3717,9 +3720,9 @@ function buildCommissionEmailHtml(data) {
 
   <!-- Header -->
   <div style="background: #1e293b; padding: 30px 40px; text-align: center;">
-    <div style="font-size: 14px; color: #94a3b8; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 8px;">Bom Pastor</div>
+    <div style="font-size: 14px; color: #94a3b8; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 8px;">SalesTwo</div>
     <h1 style="margin: 0; font-size: 22px; color: #ffffff; font-weight: 700;">RELATÓRIO SEMANAL DE COMISSÕES DE INDICAÇÃO</h1>
-    <div style="font-size: 13px; color: #64748b; margin-top: 6px;">Bom Flow CRM</div>
+    <div style="font-size: 13px; color: #64748b; margin-top: 6px;">SalesTwo CRM</div>
     <div style="height: 3px; background: linear-gradient(90deg, #f59e0b, #d97706); margin-top: 16px; border-radius: 2px;"></div>
   </div>
 
@@ -3731,7 +3734,7 @@ function buildCommissionEmailHtml(data) {
         <td style="padding: 4px 0; text-align: right;"><strong>Gerado em:</strong> ${geradoEm}</td>
       </tr>
       <tr>
-        <td style="padding: 4px 0;" colspan="2"><strong>Sistema:</strong> Bom Flow CRM</td>
+        <td style="padding: 4px 0;" colspan="2"><strong>Sistema:</strong> SalesTwo CRM</td>
       </tr>
     </table>
   </div>`;
@@ -3892,8 +3895,8 @@ function buildCommissionEmailHtml(data) {
   html += `
   <!-- Footer -->
   <div style="background: #1e293b; padding: 24px 40px; text-align: center;">
-    <div style="font-size: 13px; color: #94a3b8; font-weight: 600;">Bom Pastor</div>
-    <div style="font-size: 12px; color: #64748b; margin-top: 2px;">Bom Flow CRM</div>
+    <div style="font-size: 13px; color: #94a3b8; font-weight: 600;">SalesTwo</div>
+    <div style="font-size: 12px; color: #64748b; margin-top: 2px;">SalesTwo CRM</div>
     <div style="height: 1px; background: #334155; margin: 12px 0;"></div>
     <div style="font-size: 11px; color: #64748b;">Relatório gerado automaticamente em ${geradoEm}</div>
     <div style="font-size: 10px; color: #475569; margin-top: 6px; font-style: italic;">Este documento é destinado exclusivamente ao controle financeiro de comissões.</div>
@@ -3926,9 +3929,9 @@ function generateCommissionPDF(data) {
     const orangeAccent = [249, 115, 22];
 
     doc.rect(0, 0, doc.page.width, 80).fill(darkBg);
-    doc.fontSize(10).fill([148, 163, 184]).text('BOM PASTOR', 40, 20, { align: 'center', characterSpacing: 3 });
+    doc.fontSize(10).fill([148, 163, 184]).text('SALESTWO', 40, 20, { align: 'center', characterSpacing: 3 });
     doc.fontSize(16).fill([255, 255, 255]).text('RELATÓRIO SEMANAL DE COMISSÕES DE INDICAÇÃO', 40, 38, { align: 'center' });
-    doc.fontSize(9).fill([100, 116, 139]).text('Bom Flow CRM', 40, 60, { align: 'center' });
+    doc.fontSize(9).fill([100, 116, 139]).text('SalesTwo CRM', 40, 60, { align: 'center' });
     doc.rect(40, 78, doc.page.width - 80, 3).fill(amberAccent);
 
     let y = 95;
@@ -3936,7 +3939,7 @@ function generateCommissionPDF(data) {
     doc.text(`Período: ${periodoInicio} → ${periodoFim}`, 40, y);
     doc.text(`Gerado em: ${geradoEm}`, 40, y, { align: 'right', width: doc.page.width - 80 });
     y += 14;
-    doc.text('Sistema: Bom Flow CRM', 40, y);
+    doc.text('Sistema: SalesTwo CRM', 40, y);
     y += 20;
 
     const cols1 = [
@@ -4078,7 +4081,7 @@ function generateCommissionPDF(data) {
 
     if (y > doc.page.height - 70) { doc.addPage(); y = 40; }
     doc.rect(40, y, doc.page.width - 80, 58).fill(darkBg);
-    doc.fontSize(9).fill([148, 163, 184]).text('Bom Pastor — Bom Flow CRM', 40, y + 6, { align: 'center', width: doc.page.width - 80 });
+    doc.fontSize(9).fill([148, 163, 184]).text('SalesTwo CRM', 40, y + 6, { align: 'center', width: doc.page.width - 80 });
     doc.fontSize(8).fill([100, 116, 139]).text(`Relatório gerado automaticamente em ${geradoEm}`, 40, y + 18, { align: 'center', width: doc.page.width - 80 });
     doc.fontSize(7).fill([71, 85, 105]).text('Este documento é destinado exclusivamente ao controle financeiro de comissões.', 40, y + 30, { align: 'center', width: doc.page.width - 80 });
     doc.fontSize(7).fill(amberAccent).text('O pagamento das comissões deve ser realizado via chave PIX informada pelo indicador.', 40, y + 42, { align: 'center', width: doc.page.width - 80 });
@@ -4385,6 +4388,102 @@ router.get('/google-calendar/status', authMiddleware, loadAgentMiddleware, async
   }
 });
 
+router.get('/google-calendar/outbox-status', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const agentId = req.agent?.id;
+    if (!agentId) {
+      return res.json({
+        hasPendingItems: false,
+        hasFailedItems: false,
+        pendingCount: 0,
+        failedCount: 0,
+        lastFailedError: null,
+        lastFailedTimestamp: null,
+      });
+    }
+    const counts = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status IN ('pending','processing'))::int AS pending_count,
+         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count
+       FROM gcal_event_outbox
+       WHERE agent_id = $1`,
+      [agentId]
+    );
+    const lastFailed = await query(
+      `SELECT last_error, updated_at
+         FROM gcal_event_outbox
+        WHERE agent_id = $1 AND status = 'failed'
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [agentId]
+    );
+    const pendingCount = counts.rows[0]?.pending_count || 0;
+    const failedCount = counts.rows[0]?.failed_count || 0;
+    res.json({
+      hasPendingItems: pendingCount > 0,
+      hasFailedItems: failedCount > 0,
+      pendingCount,
+      failedCount,
+      lastFailedError: lastFailed.rows[0]?.last_error || null,
+      lastFailedTimestamp: lastFailed.rows[0]?.updated_at || null,
+    });
+  } catch (error) {
+    console.error('[Google Calendar] Outbox status error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Phase 5.1 — list calendars the connected agent can write to.
+router.get('/google-calendar/calendars', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const agentId = req.agent?.id;
+    if (!agentId) return res.status(400).json({ error: 'Agente não encontrado' });
+    const [calendars, currentTargetId] = await Promise.all([
+      listWritableCalendars(agentId),
+      getTargetCalendarForAgent(agentId),
+    ]);
+    res.json({ calendars, currentTargetId });
+  } catch (error) {
+    if (error.code === 'NOT_CONNECTED') {
+      return res.status(409).json({ error: 'Conecte o Google Calendar antes de listar calendários.' });
+    }
+    if (error.code === 'SCOPE_INSUFFICIENT') {
+      return res.status(403).json({ error: error.message, scopeOutdated: true });
+    }
+    console.error('[Google Calendar] List calendars error:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar calendários' });
+  }
+});
+
+// Phase 5.1 — persist the agent's chosen target calendar.
+router.put('/google-calendar/target-calendar', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const agentId = req.agent?.id;
+    if (!agentId) return res.status(400).json({ error: 'Agente não encontrado' });
+    const { calendarId } = req.body || {};
+    if (!calendarId || typeof calendarId !== 'string') {
+      return res.status(400).json({ error: 'calendarId é obrigatório' });
+    }
+    const result = await setTargetCalendar(agentId, calendarId);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    if (error.code === 'NOT_CONNECTED') {
+      return res.status(409).json({ error: 'Conecte o Google Calendar antes de escolher o calendário.' });
+    }
+    if (error.code === 'CALENDAR_NOT_FOUND') {
+      return res.status(404).json({ error: 'Calendário não encontrado entre os seus calendários editáveis.' });
+    }
+    if (error.code === 'SCOPE_INSUFFICIENT') {
+      return res.status(403).json({ error: error.message, scopeOutdated: true });
+    }
+    if (error.code === 'INVALID_PAYLOAD') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('[Google Calendar] Set target calendar error:', error.message);
+    res.status(500).json({ error: 'Não foi possível salvar o calendário escolhido' });
+  }
+});
+
 router.get('/google-calendar/auth-url', authMiddleware, loadAgentMiddleware, async (req, res) => {
   try {
     const agentId = req.agent?.id;
@@ -4480,6 +4579,68 @@ router.post('/google-calendar/sync', authMiddleware, loadAgentMiddleware, async 
     res.json(result);
   } catch (error) {
     console.error('[Google Calendar] Sync error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Phase 3.1 — Admin-only endpoint to revoke a vendor's Google Calendar access.
+// Strict authz: only req.user.role==='admin' OR req.agent.agentType==='admin'.
+// Uses the same disconnectAgent path as the user's self-disconnect, so the
+// Google revokeToken call + local cleanup are consistent.
+router.delete('/google-calendar/revoke-access/:agentId', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === 'admin' || req.agent?.agentType === 'admin';
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Apenas administradores podem revogar o acesso de outros usuários.' });
+    }
+
+    const { agentId } = req.params;
+    if (!agentId) {
+      return res.status(400).json({ error: 'agentId obrigatório.' });
+    }
+
+    const exists = await query('SELECT id, name FROM agents WHERE id = $1', [agentId]);
+    if (exists.rows.length === 0) {
+      return res.status(404).json({ error: 'Agente não encontrado.' });
+    }
+
+    const result = await disconnectAgent(agentId);
+    res.json({
+      success: true,
+      agentId,
+      agentName: exists.rows[0].name,
+      revoked: result.revoked,
+      revokeError: result.revokeError,
+    });
+  } catch (error) {
+    console.error('[Google Calendar] Admin revoke error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Returns the list of agent IDs that currently have a Google Calendar
+// connection, so the admin UI can decide which agents to show the
+// "Revogar acesso" action for. Admin-only.
+router.get('/google-calendar/connected-agents', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === 'admin' || req.agent?.agentType === 'admin';
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Apenas administradores podem listar conexões.' });
+    }
+    const r = await query(
+      `SELECT t.agent_id, t.calendar_email, t.last_sync_at, t.granted_scope, a.name AS agent_name
+         FROM google_calendar_tokens t
+         JOIN agents a ON a.id = t.agent_id`
+    );
+    res.json(r.rows.map(row => ({
+      agentId: row.agent_id,
+      agentName: row.agent_name,
+      calendarEmail: row.calendar_email,
+      lastSync: row.last_sync_at,
+      grantedScope: row.granted_scope,
+    })));
+  } catch (error) {
+    console.error('[Google Calendar] Connected agents error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

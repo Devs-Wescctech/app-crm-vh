@@ -1,5 +1,5 @@
 import { query } from '../config/database.js';
-import { getPermissions, getVisibilityFilter, canAccessModule } from '../config/permissions.js';
+import { getPermissions, getVisibilityFilter, getDataScope, canAccessModule } from '../config/permissions.js';
 
 export async function loadAgentMiddleware(req, res, next) {
   if (!req.user) {

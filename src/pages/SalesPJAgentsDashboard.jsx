@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getVisibleTeams } from "@/components/utils/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -37,8 +38,8 @@ export default function SalesPJAgentsDashboard() {
 
   const currentAgent = user?.agent;
   const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
-  const isAdmin = user?.role === 'admin' || currentAgentType === 'admin';
-  const isSupervisor = user?.role === 'supervisor' || currentAgentType?.includes('supervisor');
+  const isAdmin = hasFullVisibility(currentAgent);
+  const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
   const isSalesAgent = currentAgentType === 'sales' || currentAgentType === 'pre_sales' || currentAgentType === 'post_sales';
   const hasPermission = isAdmin || isSupervisor || isSalesAgent;
   const canFetchData = !!user && !!currentAgent && hasPermission;
@@ -61,15 +62,17 @@ export default function SalesPJAgentsDashboard() {
     enabled: canFetchData,
   });
 
-  const canSeeAllAgents = isAdmin || isSupervisor;
+  const canSeeAllAgents = isAdmin;
+  const visibleAgentIds = useMemo(() => getVisibleAgentIds(currentAgent, agents), [currentAgent, agents]);
   const isLoading = agentsLoading || teamsLoading || leadsLoading;
 
   const teamsForFilter = useMemo(() => {
-    return teams.map(team => ({
+    const visible = getVisibleTeams(currentAgent, teams, agents);
+    return visible.map(team => ({
       id: team.id,
       name: team.name
     }));
-  }, [teams]);
+  }, [currentAgent, teams, agents]);
 
   const filteredLeadsByDate = useMemo(() => {
     return leads.filter(lead => {
@@ -95,7 +98,7 @@ export default function SalesPJAgentsDashboard() {
   const agentStats = useMemo(() => {
     return agents
       .filter(agent => {
-        if (!canSeeAllAgents && agent.id !== currentAgent?.id) return false;
+        if (!canSeeAllAgents && !visibleAgentIds.includes(agent.id)) return false;
         const agentTeamId = agent.teamId || agent.team_id;
         if (selectedTeam && String(agentTeamId) !== String(selectedTeam)) return false;
         return agent.active;
@@ -109,9 +112,10 @@ export default function SalesPJAgentsDashboard() {
         const vendas = agentLeads.filter(l => l.stage === 'fechado_ganho').length;
         const perdidos = agentLeads.filter(l => l.stage === 'fechado_perdido').length;
         const taxaConversao = totalLeads > 0 ? ((vendas / totalLeads) * 100) : 0;
+        const getLeadValue = (l) => parseFloat(l.value) || parseFloat(l.monthlyValue) || parseFloat(l.monthly_value) || parseFloat(l.monthlyRevenue) || parseFloat(l.monthly_revenue) || 0;
         const receita = agentLeads
           .filter(l => l.stage === 'fechado_ganho')
-          .reduce((sum, l) => sum + (parseFloat(l.value) || 0), 0);
+          .reduce((sum, l) => sum + getLeadValue(l), 0);
         const ticketMedio = vendas > 0 ? (receita / vendas) : 0;
         const leadsAtivos = agentLeads.filter(l => 
           !l.concluded && !l.lost && l.stage !== 'fechado_ganho' && l.stage !== 'fechado_perdido'
@@ -212,7 +216,7 @@ export default function SalesPJAgentsDashboard() {
       </div>
 
       <DashboardFilters
-        teams={canSeeAllAgents ? teamsForFilter : []}
+        teams={(canSeeAllAgents || isSupervisor) ? teamsForFilter : []}
         selectedTeam={selectedTeam}
         onTeamChange={setSelectedTeam}
         selectedPeriod={selectedPeriod}
@@ -221,7 +225,7 @@ export default function SalesPJAgentsDashboard() {
         onDateRangeChange={setDateRange}
         onClearFilters={handleClearFilters}
         showAgentFilter={false}
-        showTeamFilter={canSeeAllAgents}
+        showTeamFilter={canSeeAllAgents || isSupervisor}
         showStageFilter={false}
       />
 
@@ -278,8 +282,8 @@ export default function SalesPJAgentsDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-purple-600 dark:text-purple-400 font-medium">Receita Total</p>
-                <p className="text-3xl font-bold text-purple-700 dark:text-purple-300">R$ {totalGeralReceita.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">Ticket médio: R$ {totalGeralVendas > 0 ? (totalGeralReceita / totalGeralVendas).toFixed(2) : 0}</p>
+                <p className="text-3xl font-bold text-purple-700 dark:text-purple-300">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalGeralReceita)}</p>
+                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">Ticket médio: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalGeralVendas > 0 ? totalGeralReceita / totalGeralVendas : 0)}</p>
               </div>
               <DollarSign className="w-10 h-10 text-purple-500 dark:text-purple-400 opacity-50" />
             </div>
@@ -341,7 +345,7 @@ export default function SalesPJAgentsDashboard() {
                           </div>
                           <div className="bg-orange-100 dark:bg-orange-950 p-2 rounded">
                             <p className="text-xs text-gray-600 dark:text-gray-400">Receita</p>
-                            <p className="text-sm font-bold text-orange-600 dark:text-orange-400">R$ {stat.receita.toFixed(2)}</p>
+                            <p className="text-sm font-bold text-orange-600 dark:text-orange-400">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stat.receita)}</p>
                           </div>
                         </div>
                       </div>
@@ -395,7 +399,7 @@ export default function SalesPJAgentsDashboard() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Receita</p>
-                      <p className="font-bold text-orange-600 dark:text-orange-400">R$ {stat.receita.toFixed(2)}</p>
+                      <p className="font-bold text-orange-600 dark:text-orange-400">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stat.receita)}</p>
                     </div>
                   </div>
                 </div>

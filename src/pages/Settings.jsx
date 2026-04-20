@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { canAccessSystemsItem, hasAnySystemsAccess } from "@/components/utils/permissions";
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -44,20 +46,35 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
       toast.success('Configuração salva com sucesso!');
     },
+    onError: (error) => {
+      toast.error(`Erro ao salvar: ${error?.message || 'tente novamente'}`);
+    },
   });
   const isAdmin = user?.role === 'admin';
+  const currentAgent = user?.agent;
 
-  if (!isAdmin) {
+  const canSalesFields = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsSalesFields');
+  const canGoogleCalendarSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsGoogleCalendar');
+  const canAutentiqueSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsAutentique');
+  const anySystemsTab = canSalesFields || canGoogleCalendarSettings || canAutentiqueSettings;
+
+  if (!anySystemsTab) {
     return (
       <div className="p-6 min-h-screen bg-gray-50 dark:bg-gray-950 space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Minha Conta</h1>
           <p className="text-gray-500">Gerencie suas integrações pessoais</p>
         </div>
-        <GoogleCalendarSettings settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={false} />
+        <GoogleCalendarSettings settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={false} showSystemStatus={false} />
       </div>
     );
   }
+
+  const defaultTab = canSalesFields
+    ? "sales-fields"
+    : canGoogleCalendarSettings
+      ? "google-calendar"
+      : "autentique";
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-950 min-h-screen">
@@ -69,33 +86,45 @@ export default function Settings() {
         </p>
       </div>
 
-      <Tabs defaultValue="sales-fields" className="w-full">
+      <Tabs defaultValue={defaultTab} className="w-full">
         <TabsList className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
-          <TabsTrigger value="sales-fields" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
-            <ListChecks className="w-4 h-4 mr-2" />
-            Campos de Vendas
-          </TabsTrigger>
-          <TabsTrigger value="google-calendar" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
-            <Calendar className="w-4 h-4 mr-2" />
-            Google Agenda
-          </TabsTrigger>
-          <TabsTrigger value="autentique" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
-            <FileSignature className="w-4 h-4 mr-2" />
-            Autentique
-          </TabsTrigger>
+          {canSalesFields && (
+            <TabsTrigger value="sales-fields" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
+              <ListChecks className="w-4 h-4 mr-2" />
+              Campos de Vendas
+            </TabsTrigger>
+          )}
+          {canGoogleCalendarSettings && (
+            <TabsTrigger value="google-calendar" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
+              <Calendar className="w-4 h-4 mr-2" />
+              Google Agenda
+            </TabsTrigger>
+          )}
+          {canAutentiqueSettings && (
+            <TabsTrigger value="autentique" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
+              <FileSignature className="w-4 h-4 mr-2" />
+              Autentique
+            </TabsTrigger>
+          )}
         </TabsList>
 
-        <TabsContent value="sales-fields" className="space-y-6">
-          <SalesFieldsManager settings={settings} onSave={createOrUpdateSettingMutation} />
-        </TabsContent>
+        {canSalesFields && (
+          <TabsContent value="sales-fields" className="space-y-6">
+            <SalesFieldsManager settings={settings} onSave={createOrUpdateSettingMutation} />
+          </TabsContent>
+        )}
 
-        <TabsContent value="google-calendar" className="space-y-6">
-          <GoogleCalendarSettings settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={isAdmin} />
-        </TabsContent>
+        {canGoogleCalendarSettings && (
+          <TabsContent value="google-calendar" className="space-y-6">
+            <GoogleCalendarSettings settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={isAdmin} showSystemStatus={true} />
+          </TabsContent>
+        )}
 
-        <TabsContent value="autentique" className="space-y-6">
-          <AutentiqueSettings settings={settings} onSave={createOrUpdateSettingMutation} />
-        </TabsContent>
+        {canAutentiqueSettings && (
+          <TabsContent value="autentique" className="space-y-6">
+            <AutentiqueSettings settings={settings} onSave={createOrUpdateSettingMutation} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
@@ -141,7 +170,19 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
   };
 
   const handleSave = async () => {
-    if (options.length === 0) {
+    let toSave = options;
+    const pending = newOption.trim();
+    if (pending) {
+      if (options.includes(pending)) {
+        toast.error('Esta opção já existe');
+        return;
+      }
+      toSave = [...options, pending];
+      setOptions(toSave);
+      setNewOption("");
+    }
+
+    if (toSave.length === 0) {
       toast.error('Adicione pelo menos uma opção antes de salvar');
       return;
     }
@@ -149,11 +190,11 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     try {
       await onSave.mutateAsync({
         key: settingKey,
-        value: JSON.stringify(options),
+        value: JSON.stringify(toSave),
         type: 'json',
       });
     } catch (error) {
-      toast.error('Erro ao salvar opções');
+      // erro já é tratado pelo onError da mutation
     }
     setSaving(false);
   };
@@ -250,22 +291,14 @@ function SalesFieldsManager({ settings, onSave }) {
   );
 }
 
-function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [saving, setSaving] = useState(false);
+function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = false }) {
   const [connecting, setConnecting] = useState(false);
   const queryClient = useQueryClient();
-
-  const getSetting = (key) => {
-    const s = settings.find(s => (s.setting_key || s.settingKey) === key);
-    return (s?.setting_value || s?.settingValue) || "";
-  };
 
   const { data: gcalStatus, refetch: refetchStatus } = useQuery({
     queryKey: ["gcalStatus"],
     queryFn: async () => {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/status", {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -287,53 +320,94 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (settings.length > 0) {
-      setClientId(getSetting("google_calendar_client_id"));
-      setClientSecret(getSetting("google_calendar_client_secret"));
-    }
-  }, [settings]);
+  const pollIntervalRef = useRef(null);
 
-  const handleSaveCredentials = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
-      toast.error("Preencha Client ID e Client Secret");
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave.mutateAsync({ key: "google_calendar_client_id", value: clientId.trim(), type: "text" });
-      await onSave.mutateAsync({ key: "google_calendar_client_secret", value: clientSecret.trim(), type: "text" });
-      toast.success("Credenciais salvas!");
-      refetchStatus();
-    } catch {
-      toast.error("Erro ao salvar credenciais");
-    }
-    setSaving(false);
-  };
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, []);
+
+  const FRIENDLY_AUTH_ERROR = "A integração pode não estar configurada — fale com o administrador.";
 
   const handleConnect = async () => {
+    if (connecting) return;
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    const popup = window.open("about:blank", "gcalOAuth", "width=520,height=640");
+    if (!popup) {
+      toast.error("Permita pop-ups para este site para conectar sua conta Google.");
+      return;
+    }
     setConnecting(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/auth-url", {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        toast.error(data.error || "Erro ao obter URL de autorização");
+      if (!res.ok || !data.url) {
+        try { popup.close(); } catch { /* ignore */ }
+        toast.error(data.error || FRIENDLY_AUTH_ERROR);
+        setConnecting(false);
+        return;
       }
+      popup.location.href = data.url;
+
+      const pollMs = 4000;
+      const maxMs = 5 * 60 * 1000;
+      const startedAt = Date.now();
+      const stop = () => {
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        setConnecting(false);
+      };
+      pollIntervalRef.current = setInterval(async () => {
+        if (Date.now() - startedAt > maxMs) {
+          stop();
+          return;
+        }
+        try {
+          const statusRes = await fetch("/api/functions/google-calendar/status", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (statusRes.ok) {
+            const s = await statusRes.json();
+            if (s.connected) {
+              stop();
+              refetchStatus();
+              queryClient.invalidateQueries({ queryKey: ["googleCalendarEvents"] });
+              toast.success("Google Calendar conectado com sucesso!");
+              if (!popup.closed) {
+                try { popup.close(); } catch { /* cross-origin, ignore */ }
+              }
+              return;
+            }
+          }
+        } catch { /* keep polling */ }
+        if (popup.closed) {
+          stop();
+          refetchStatus();
+        }
+      }, pollMs);
     } catch {
-      toast.error("Erro ao conectar");
+      try { popup.close(); } catch { /* ignore */ }
+      toast.error(FRIENDLY_AUTH_ERROR);
+      setConnecting(false);
     }
-    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
     setConnecting(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       await fetch("/api/functions/google-calendar/disconnect", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -349,7 +423,7 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
 
   const handleManualSync = async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/sync", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -362,46 +436,187 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
     }
   };
 
+  const isConfigured = !!gcalStatus?.configured;
+  const isConnected = !!gcalStatus?.connected;
+
   return (
     <div className="space-y-6">
+      {showSystemStatus && (
+        <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+            <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
+              <SettingsIcon className="w-5 h-5" />
+              Integração Google Calendar do sistema
+            </CardTitle>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Status da integração que conecta o SalesTwo ao Google. Configurada pelo time técnico via variáveis de ambiente.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-6 space-y-4">
+            <div
+              className="p-4 rounded-lg flex items-start gap-3"
+              style={{ backgroundColor: isConfigured ? "#f0fdf4" : "#fef2f2" }}
+            >
+              {isConfigured ? (
+                <>
+                  <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-700">
+                      As credenciais da integração com o Google Calendar foram configuradas pelo time técnico.
+                    </p>
+                    <p className="text-xs text-green-600 mt-1">
+                      Os vendedores já podem conectar suas contas pessoais do Google.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-red-600">
+                      A integração com o Google Calendar ainda não foi configurada pelo time técnico.
+                    </p>
+                    <p className="text-xs text-red-500 mt-1">
+                      Enquanto isso, ninguém conseguirá conectar a conta Google.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {isAdmin && (
+              <div className="border-t pt-4 space-y-2">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Detalhes técnicos (somente leitura)</p>
+                <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                  <li className="flex items-center gap-2">
+                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_CLIENT_ID</code> {isConfigured ? "configurado" : "não configurado"}</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_CLIENT_SECRET</code> {isConfigured ? "configurado" : "não configurado"}</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    {isConfigured ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                    <span><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">GCAL_REDIRECT_URI</code> {isConfigured ? "configurado" : "não configurado"}</span>
+                  </li>
+                </ul>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Para alterar essas credenciais, contate o administrador da infraestrutura. Os valores em si não são exibidos por segurança.
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  URI de redirecionamento esperada: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded break-all">{window.location.origin}/api/functions/google-calendar/callback</code>
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  <strong>Dica:</strong> se ao conectar aparecer o erro <code>redirect_uri_mismatch</code>, confira se a URI acima está cadastrada exatamente igual em <em>"Authorized redirect URIs"</em> do OAuth Client no Google Cloud Console.
+                </p>
+
+                <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Como configurar no Google Cloud Console:</p>
+                  <ol className="list-decimal ml-5 space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                    <li>
+                      Acesse o{" "}
+                      <a
+                        href="https://console.cloud.google.com/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                        style={{ color: "#F98F6F" }}
+                      >
+                        Google Cloud Console
+                      </a>
+                      .
+                    </li>
+                    <li>Crie um projeto ou selecione um existente.</li>
+                    <li>
+                      Em <em>APIs &amp; Services → Library</em>, ative a <strong>Google Calendar API</strong>.
+                    </li>
+                    <li>
+                      Em <em>APIs &amp; Services → OAuth consent screen</em>, configure a tela de consentimento (User Type: External, e adicione os e-mails dos vendedores em <em>Test users</em> enquanto o app estiver em modo Testing).
+                    </li>
+                    <li>
+                      Em <em>APIs &amp; Services → Credentials</em>, crie um <strong>OAuth 2.0 Client ID</strong> do tipo <em>Aplicativo Web</em>.
+                    </li>
+                    <li>
+                      Em <em>"Authorized redirect URIs"</em>, adicione exatamente a URI mostrada acima (e a URI de produção, se houver).
+                    </li>
+                    <li>
+                      Copie o <strong>Client ID</strong> e <strong>Client Secret</strong> e configure as variáveis de ambiente <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_CLIENT_ID</code>, <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_CLIENT_SECRET</code> e <code className="bg-gray-100 dark:bg-gray-900 px-1 rounded">GCAL_REDIRECT_URI</code> no servidor.
+                    </li>
+                    <li>Reinicie o backend e teste o botão "Conectar minha conta Google" abaixo.</li>
+                  </ol>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <CardHeader className="border-b border-gray-200 dark:border-gray-800">
           <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
             <Calendar className="w-5 h-5" />
-            Google Calendar
+            Conectar sua conta Google
           </CardTitle>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Conexão pessoal: você está conectando <strong>a sua própria conta Google</strong> ao SalesTwo, para sincronizar a sua agenda de vendas. Cada usuário conecta a conta dele.
+          </p>
         </CardHeader>
         <CardContent className="pt-6 space-y-6">
-          <div className="p-4 rounded-lg" style={{ backgroundColor: gcalStatus?.connected ? "#f0fdf4" : gcalStatus?.configured ? "#fef3c7" : "#fef2f2" }}>
-            <div className="flex items-center gap-2">
-              {gcalStatus?.connected ? (
+          <div
+            className="p-4 rounded-lg"
+            style={{ backgroundColor: isConnected ? "#f0fdf4" : isConfigured ? "#fef3c7" : "#fef2f2" }}
+          >
+            <div className="flex items-start gap-3">
+              {isConnected ? (
                 <>
-                  <Link2 className="w-5 h-5 text-green-600" />
+                  <Link2 className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
                   <div>
-                    <span className="text-sm font-medium text-green-700">Conectado ao Google Calendar</span>
+                    <p className="text-sm font-medium text-green-700">Sua conta Google está conectada</p>
                     {gcalStatus.calendarEmail && (
-                      <p className="text-xs text-green-600">{gcalStatus.calendarEmail}</p>
+                      <p className="text-xs text-green-600 mt-0.5">Conta: {gcalStatus.calendarEmail}</p>
                     )}
                     {gcalStatus.lastSync && (
-                      <p className="text-xs text-green-500">Última sincronização: {new Date(gcalStatus.lastSync).toLocaleString("pt-BR")}</p>
+                      <p className="text-xs text-green-500 mt-0.5">Última sincronização: {new Date(gcalStatus.lastSync).toLocaleString("pt-BR")}</p>
                     )}
                   </div>
                 </>
-              ) : gcalStatus?.configured ? (
+              ) : isConfigured ? (
                 <>
-                  <Unlink className="w-5 h-5 text-amber-600" />
-                  <span className="text-sm font-medium text-amber-700">Credenciais configuradas. Clique em "Conectar" para autorizar sua conta Google.</span>
+                  <Unlink className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-700">
+                      A integração com o Google Calendar já está configurada no sistema.
+                    </p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Agora você pode conectar a sua conta Google para sincronizar sua agenda.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <>
-                  <Unlink className="w-5 h-5 text-red-500" />
-                  <span className="text-sm font-medium text-red-600">Não configurado. {isAdmin ? "Configure as credenciais abaixo." : "Peça ao admin para configurar."}</span>
+                  <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-red-600">
+                      A integração com o Google Calendar ainda não está disponível.
+                    </p>
+                    <p className="text-xs text-red-500 mt-0.5">
+                      Entre em contato com o administrador do sistema para liberar a conexão.
+                    </p>
+                  </div>
                 </>
               )}
             </div>
+            {isConnected && gcalStatus?.scopeOutdated && (
+              <div className="mt-3 p-3 rounded border border-amber-300 bg-amber-50 text-amber-800 text-xs">
+                <strong>Atenção:</strong> sua conexão usa um escopo de permissão antigo. Recomendamos desconectar e conectar novamente para aplicar o novo padrão de privilégio mínimo.
+              </div>
+            )}
           </div>
 
-          {gcalStatus?.connected && (
+          {isConnected && <TargetCalendarPicker />}
+
+          {isConnected && (
             <div className="flex gap-2">
               <Button onClick={handleManualSync} variant="outline" className="flex-1">
                 <Save className="w-4 h-4 mr-2" />
@@ -409,12 +624,12 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
               </Button>
               <Button onClick={handleDisconnect} disabled={connecting} variant="destructive">
                 {connecting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Unlink className="w-4 h-4 mr-1" />}
-                Desconectar
+                Desconectar minha conta Google
               </Button>
             </div>
           )}
 
-          {!gcalStatus?.connected && gcalStatus?.configured && (
+          {!isConnected && isConfigured && (
             <Button
               onClick={handleConnect}
               disabled={connecting}
@@ -422,56 +637,14 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin }) {
               style={{ background: "linear-gradient(135deg, #5A2A3C, #F98F6F)" }}
             >
               {connecting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Calendar className="w-4 h-4 mr-2" />}
-              Conectar minha Conta Google
+              Conectar minha conta Google
             </Button>
-          )}
-
-          {isAdmin && (
-            <div className="border-t pt-4 space-y-4">
-              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Configuração do Admin (uma única vez)</p>
-              <div>
-                <Label>Google Client ID</Label>
-                <Input
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Seu Client ID do Google Cloud Console"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label>Google Client Secret</Label>
-                <Input
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  type="password"
-                  placeholder="Seu Client Secret do Google Cloud Console"
-                  className="mt-1"
-                />
-              </div>
-              <Button onClick={handleSaveCredentials} disabled={saving} className="w-full" variant="outline">
-                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                Salvar Credenciais
-              </Button>
-
-              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2 border-t pt-3">
-                <p className="font-semibold text-gray-800 dark:text-gray-200">Como obter (feito uma única vez):</p>
-                <ol className="list-decimal ml-4 space-y-1">
-                  <li>Acesse o <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Google Cloud Console</a></li>
-                  <li>Crie um projeto e ative a <strong>Google Calendar API</strong></li>
-                  <li>Vá em <strong>Credenciais → Criar Credenciais → ID do cliente OAuth</strong></li>
-                  <li>Configure a Tela de Consentimento (tipo Externo)</li>
-                  <li>Tipo: <strong>Aplicativo da Web</strong></li>
-                  <li>URI de redirecionamento: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-xs break-all">{window.location.origin}/api/functions/google-calendar/callback</code></li>
-                  <li>Copie Client ID e Client Secret e salve acima</li>
-                </ol>
-              </div>
-            </div>
           )}
 
           <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
             <p className="text-xs text-blue-700 dark:text-blue-300">
-              <strong>Sincronização automática:</strong> Atividades criadas no SalesTwo vão automaticamente para o Google Calendar.
-              Eventos criados no Google Calendar são importados a cada 5 minutos. Tudo funciona de forma transparente.
+              <strong>Sincronização automática:</strong> Atividades criadas no SalesTwo vão automaticamente para a sua agenda Google.
+              Eventos criados na sua agenda Google são importados a cada 5 minutos. Tudo funciona de forma transparente.
             </p>
           </div>
         </CardContent>
@@ -634,6 +807,93 @@ function AutentiqueSettings({ settings, onSave }) {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+// Phase 5.1 — lets the seller pick which Google calendar receives SalesTwo events.
+function TargetCalendarPicker() {
+  const queryClient = useQueryClient();
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["gcalCalendars"],
+    queryFn: async () => {
+      const token = localStorage.getItem("accessToken");
+      const res = await fetch("/api/functions/google-calendar/calendars", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Falha ao carregar calendários");
+      }
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [pendingValue, setPendingValue] = useState(null);
+
+  const calendars = data?.calendars || [];
+  const currentValue = pendingValue ?? data?.currentTargetId ?? (calendars.find(c => c.primary)?.id || "");
+
+  const handleChange = async (value) => {
+    setPendingValue(value);
+    setSaving(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const res = await fetch("/api/functions/google-calendar/target-calendar", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ calendarId: value }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Falha ao salvar calendário");
+      toast.success(`Calendário definido: ${j.summary || value}`);
+      queryClient.invalidateQueries({ queryKey: ["gcalStatus"] });
+    } catch (e) {
+      toast.error(e.message);
+      setPendingValue(null);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+        Sincronizar eventos para o calendário:
+      </Label>
+      {isLoading && (
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin" /> Carregando calendários…
+        </div>
+      )}
+      {isError && (
+        <div className="flex items-center justify-between gap-2 text-sm text-red-600">
+          <span>Não foi possível carregar calendários.</span>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>Tentar novamente</Button>
+        </div>
+      )}
+      {!isLoading && !isError && calendars.length === 0 && (
+        <p className="text-sm text-amber-700">Nenhum calendário editável encontrado nesta conta Google.</p>
+      )}
+      {!isLoading && !isError && calendars.length > 0 && (
+        <>
+          <Select value={currentValue} onValueChange={handleChange} disabled={saving}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Escolha um calendário" />
+            </SelectTrigger>
+            <SelectContent>
+              {calendars.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.summary}{c.primary ? " (principal)" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Atividades criadas no SalesTwo aparecerão neste calendário do Google. Você pode trocar a qualquer momento.
+          </p>
+        </>
+      )}
     </div>
   );
 }

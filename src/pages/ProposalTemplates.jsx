@@ -525,7 +525,7 @@ export default function ProposalTemplates() {
                   <Input
                     value={formData.productName}
                     onChange={(e) => setFormData({...formData, productName: e.target.value})}
-                    placeholder="Plano Funeral Bronze"
+                    placeholder="Ex: Consultoria Premium"
                     className="mt-1.5 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl"
                   />
                 </div>

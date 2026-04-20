@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +99,7 @@ export default function LeadPJAutomations() {
   const [testingAutomation, setTestingAutomation] = useState(null);
   const [isTokenDialogOpen, setIsTokenDialogOpen] = useState(false);
   const [automationToken, setAutomationToken] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', confirmLabel: '', variant: 'default', onConfirm: null });
   const [proposalTemplateId, setProposalTemplateId] = useState("");
   const [contractTemplateId, setContractTemplateId] = useState("");
   const [templatePickerFor, setTemplatePickerFor] = useState(null);
@@ -921,9 +923,14 @@ export default function LeadPJAutomations() {
                         variant="ghost"
                         size="icon"
                         onClick={() => {
-                          if (confirm('Deseja excluir esta automação?')) {
-                            deleteAutomationMutation.mutate(automation.id);
-                          }
+                          setConfirmDialog({
+                            isOpen: true,
+                            title: 'Excluir automação',
+                            message: 'Tem certeza que deseja excluir esta automação?',
+                            confirmLabel: 'Excluir',
+                            variant: 'danger',
+                            onConfirm: () => { deleteAutomationMutation.mutate(automation.id); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
+                          });
                         }}
                       >
                         <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
@@ -1432,6 +1439,17 @@ export default function LeadPJAutomations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        cancelLabel="Cancelar"
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 }

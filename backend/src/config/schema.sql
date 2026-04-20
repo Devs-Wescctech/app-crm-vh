@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS teams (
     name VARCHAR(255) NOT NULL UNIQUE,
     description TEXT,
     supervisor_email VARCHAR(255),
+    supervisor_id UUID,
+    coordinator_id UUID,
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS agents (
     whatsapp_token_expires_at TIMESTAMP,
     phone VARCHAR(50),
     territory_id UUID,
+    timezone TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -455,6 +458,7 @@ CREATE TABLE IF NOT EXISTS activities_pj (
     priority VARCHAR(50) DEFAULT 'media',
     notes TEXT,
     duration INTEGER,
+    duration_minutes INTEGER,
     reminder VARCHAR(50),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -1238,6 +1242,10 @@ CREATE INDEX IF NOT EXISTS idx_log_est_agent_id ON gerador_leads_log_estruturado
 CREATE INDEX IF NOT EXISTS idx_log_est_status_envio ON gerador_leads_log_estruturado(status_envio);
 CREATE INDEX IF NOT EXISTS idx_log_est_convertido ON gerador_leads_log_estruturado(convertido);
 
+-- access_token / refresh_token: stored as ciphertext using AES-256-GCM
+-- with version prefix `enc:v1:` (see backend/src/utils/cryptoTokens.js).
+-- Plaintext values from before Phase 1.1 are migrated by
+-- backend/scripts/encrypt_gcal_tokens.js (idempotent).
 CREATE TABLE IF NOT EXISTS google_calendar_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     agent_id UUID REFERENCES agents(id) ON DELETE CASCADE UNIQUE,
@@ -1247,8 +1255,81 @@ CREATE TABLE IF NOT EXISTS google_calendar_tokens (
     calendar_email VARCHAR(255),
     last_sync_at TIMESTAMPTZ,
     sync_token TEXT,
+    granted_scope TEXT,
+    target_calendar_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Phase 1.2 — granted_scope tracks which OAuth scope the user actually consented
+-- to. Tokens issued before this column existed have NULL here and are flagged as
+-- outdated by the API; the UI can prompt reconnection.
+ALTER TABLE google_calendar_tokens ADD COLUMN IF NOT EXISTS granted_scope TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_gcal_tokens_agent ON google_calendar_tokens(agent_id);
+
+-- Phase 2.1 — Outbox of pending Google Calendar operations.
+-- Hooks in entities.js enqueue rows here instead of calling the Google API
+-- directly, so that transient failures can be retried with exponential
+-- backoff by gcalOutboxWorker (see backend/src/workers/gcalOutboxWorker.js).
+CREATE TABLE IF NOT EXISTS gcal_event_outbox (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    activity_id UUID,
+    activity_table VARCHAR(20) NOT NULL CHECK (activity_table IN ('activities','activities_pj')),
+    op VARCHAR(10) NOT NULL CHECK (op IN ('create','update','delete')),
+    payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','succeeded','failed')),
+    attempts INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gcal_event_outbox_status_next_retry
+    ON gcal_event_outbox (status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_gcal_event_outbox_activity
+    ON gcal_event_outbox (activity_table, activity_id);
+
+-- =====================
+-- COORDINATOR ROLE MIGRATION
+-- =====================
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS coordinator_id UUID;
+CREATE INDEX IF NOT EXISTS idx_teams_coordinator ON teams(coordinator_id);
+
+INSERT INTO agent_types (id, key, label, description, color, modules, allowed_submenus, active)
+VALUES (
+  gen_random_uuid(),
+  'coordinator',
+  'Coordenador',
+  'Coordenador de vendas com visibilidade total e gestão dos times atribuídos',
+  'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
+  ARRAY['dashboard', 'sales_pj', 'agents', 'teams', 'reports'],
+  ARRAY[]::TEXT[],
+  true
+) ON CONFLICT (key) DO NOTHING;
+
+-- =====================
+-- SUPERVISOR ROLE MIGRATION
+-- =====================
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS supervisor_id UUID;
+CREATE INDEX IF NOT EXISTS idx_teams_supervisor ON teams(supervisor_id);
+
+UPDATE agents SET agent_type = 'supervisor' WHERE agent_type = 'sales_supervisor';
+DELETE FROM agent_types WHERE key = 'sales_supervisor' AND EXISTS (SELECT 1 FROM agent_types WHERE key = 'supervisor');
+UPDATE agent_types SET key = 'supervisor', label = 'Supervisor' WHERE key = 'sales_supervisor';
+
+-- =====================
+-- FASE S1: VÍNCULO DIRETO VENDEDOR → SUPERVISOR
+-- =====================
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES agents(id);
+CREATE INDEX IF NOT EXISTS idx_agents_supervisor_id ON agents(supervisor_id);
+
+UPDATE agents a
+SET supervisor_id = t.supervisor_id
+FROM teams t
+WHERE a.team_id = t.id
+  AND a.agent_type = 'sales'
+  AND t.supervisor_id IS NOT NULL
+  AND a.supervisor_id IS NULL;

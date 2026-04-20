@@ -13,7 +13,7 @@ import {
   notifyProposalStatus
 } from '../services/notificationService.js';
 import { executeLeadCreatedAutomation } from '../services/automationService.js';
-import { createGoogleEvent, updateGoogleEvent, deleteGoogleEvent } from '../services/googleCalendarService.js';
+import { enqueueGcalOp } from '../services/gcalOutboxService.js';
 
 const router = Router();
 
@@ -253,13 +253,18 @@ for (const [route, options] of Object.entries(entities)) {
               json: async (data) => {
                 const agentId = data?.createdBy || data?.created_by;
                 if (data && data.id && agentId) {
-                  console.log('[GCal Hook] Creating Google event for agent', agentId, 'activity', data.id);
-                  createGoogleEvent(agentId, {
-                    id: data.id,
-                    type: data.type || data.Type,
-                    description: data.description,
-                    scheduled_at: data.scheduledAt || data.scheduled_at,
-                  }).catch(err => console.error('[GCal Hook] create error:', err.message));
+                  // Phase 2.1 — enqueue instead of calling Google directly.
+                  enqueueGcalOp({
+                    agentId,
+                    activityId: data.id,
+                    activityTable: 'activities_pj',
+                    op: 'create',
+                    payload: {
+                      type: data.type || data.Type,
+                      description: data.description,
+                      scheduled_at: data.scheduledAt || data.scheduled_at,
+                    },
+                  });
                 }
                 origStatusJson(data);
               }
@@ -278,16 +283,22 @@ for (const [route, options] of Object.entries(entities)) {
         await crud.update(req, {
           ...res,
           json: async (data) => {
-            const googleEventId = data?.googleEventId || data?.google_event_id;
             const agentId = data?.createdBy || data?.created_by;
-            if (data && googleEventId && agentId) {
-              console.log('[GCal Hook] Updating Google event', googleEventId, 'for agent', agentId);
-              updateGoogleEvent(agentId, googleEventId, {
-                type: data.type || data.Type,
-                description: data.description,
-                scheduled_at: data.scheduledAt || data.scheduled_at,
-                completed: data.completed,
-              }).catch(err => console.error('[GCal Hook] update error:', err.message));
+            if (data && data.id && agentId) {
+              // Phase 2.1 — enqueue update. Worker will resolve the
+              // google_event_id from the activity row at execution time.
+              enqueueGcalOp({
+                agentId,
+                activityId: data.id,
+                activityTable: 'activities_pj',
+                op: 'update',
+                payload: {
+                  type: data.type || data.Type,
+                  description: data.description,
+                  scheduled_at: data.scheduledAt || data.scheduled_at,
+                  completed: data.completed,
+                },
+              });
             }
             originalJson(data);
           }
@@ -308,8 +319,15 @@ for (const [route, options] of Object.entries(entities)) {
           ...res,
           json: async (data) => {
             if (row && row.google_event_id && row.created_by) {
-              deleteGoogleEvent(row.created_by, row.google_event_id)
-                .catch(err => console.error('[GCal Hook] delete error:', err.message));
+              // Phase 2.1 — enqueue deletion. activity_id is null because
+              // the row was just deleted; payload carries the event id.
+              enqueueGcalOp({
+                agentId: row.created_by,
+                activityId: null,
+                activityTable: 'activities_pj',
+                op: 'delete',
+                payload: { google_event_id: row.google_event_id },
+              });
             }
             originalJson(data);
           }
@@ -346,7 +364,7 @@ for (const [route, options] of Object.entries(entities)) {
 router.get('/agents', authMiddleware, async (req, res) => {
   try {
     const result = await query(`
-      SELECT id, name, cpf, email, agent_type, team_id, skills, active, 
+      SELECT id, name, cpf, email, agent_type, team_id, supervisor_id, skills, active, 
              photo_url, permissions, level, online, capacity, working_hours, 
              queue_ids, work_unit, role, must_reset_password, erp_agent_id,
              whatsapp_access_token, whatsapp_token_expires_at, created_at, updated_at
@@ -365,7 +383,7 @@ router.get('/agents/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await query(`
-      SELECT id, name, cpf, email, agent_type, team_id, skills, active, 
+      SELECT id, name, cpf, email, agent_type, team_id, supervisor_id, skills, active, 
              photo_url, permissions, level, online, capacity, working_hours, 
              queue_ids, work_unit, role, must_reset_password, erp_agent_id,
              whatsapp_access_token, whatsapp_token_expires_at, created_at, updated_at
@@ -386,6 +404,34 @@ router.get('/agents/:id', authMiddleware, async (req, res) => {
 router.post('/agents', authMiddleware, async (req, res) => {
   try {
     const data = convertKeysToSnake(req.body);
+
+    if (req.user?.id) {
+      const requestor = await query('SELECT agent_type, team_id FROM agents WHERE id = $1', [req.user.id]);
+      if (requestor.rows.length > 0) {
+        const reqType = requestor.rows[0].agent_type;
+        const reqTeamId = requestor.rows[0].team_id;
+
+        if (!['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(reqType)) {
+          return res.status(403).json({ message: 'Sem permissão para criar agentes' });
+        }
+
+        if (reqType === 'coordinator' && data.agent_type === 'admin') {
+          return res.status(403).json({ message: 'Coordenadores não podem criar agentes do tipo admin' });
+        }
+
+        if (reqType === 'supervisor' || reqType === 'sales_supervisor') {
+          if (['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(data.agent_type)) {
+            return res.status(403).json({ message: 'Supervisores só podem criar agentes do tipo vendedor' });
+          }
+          const supTeam = await query('SELECT id FROM teams WHERE supervisor_id = $1', [req.user.id]);
+          const supervisorTeamId = supTeam.rows.length > 0 ? supTeam.rows[0].id : reqTeamId;
+          if (supervisorTeamId) {
+            data.team_id = supervisorTeamId;
+          }
+          data.supervisor_id = req.user.id;
+        }
+      }
+    }
     
     if (!data.email) {
       return res.status(400).json({ message: 'Email is required' });
@@ -400,12 +446,23 @@ router.post('/agents', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Email already registered' });
     }
     
+    for (const key of Object.keys(data)) {
+      if ((key.endsWith('_id') || key === 'id') && data[key] === '') {
+        data[key] = null;
+      }
+    }
+
     let password_hash = null;
     if (data.password) {
       password_hash = await bcrypt.hash(data.password, 10);
       delete data.password;
     }
     
+    const nonAgentFields = ['coordinator_id', 'allowed_submenus', 'modules'];
+    for (const f of nonAgentFields) {
+      delete data[f];
+    }
+
     const keys = Object.keys(data).filter(k => k !== 'password');
     const values = keys.map(k => data[k]);
     
@@ -437,9 +494,41 @@ router.put('/agents/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const data = convertKeysToSnake(req.body);
+
+    if (req.user?.id) {
+      const requestor = await query('SELECT agent_type, team_id FROM agents WHERE id = $1', [req.user.id]);
+      if (requestor.rows.length > 0) {
+        const reqType = requestor.rows[0].agent_type;
+        const reqTeamId = requestor.rows[0].team_id;
+
+        if (!['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(reqType) && id !== req.user.id) {
+          return res.status(403).json({ message: 'Sem permissão para editar agentes' });
+        }
+
+        if (reqType === 'coordinator' && data.agent_type === 'admin') {
+          return res.status(403).json({ message: 'Coordenadores não podem alterar agentes para o tipo admin' });
+        }
+
+        if (reqType === 'supervisor' || reqType === 'sales_supervisor') {
+          if (data.agent_type && ['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(data.agent_type)) {
+            return res.status(403).json({ message: 'Supervisores não podem promover agentes para este tipo' });
+          }
+          const targetAgent = await query('SELECT supervisor_id, agent_type FROM agents WHERE id = $1', [id]);
+          if (targetAgent.rows.length > 0) {
+            if (targetAgent.rows[0].supervisor_id !== req.user.id) {
+              return res.status(403).json({ message: 'Supervisores só podem editar seus próprios vendedores' });
+            }
+            if (['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(targetAgent.rows[0].agent_type)) {
+              return res.status(403).json({ message: 'Supervisores não podem editar agentes deste tipo' });
+            }
+          }
+          delete data.team_id;
+          data.supervisor_id = req.user.id;
+        }
+      }
+    }
     
-    // Convert empty strings to null for UUID fields
-    const uuidFields = ['team_id'];
+    const uuidFields = ['team_id', 'supervisor_id', 'coordinator_id'];
     for (const field of uuidFields) {
       if (data[field] === '' || data[field] === undefined) {
         data[field] = null;
@@ -463,6 +552,11 @@ router.put('/agents/:id', authMiddleware, async (req, res) => {
       delete data.password;
     }
     
+    const nonAgentFields = ['coordinator_id', 'allowed_submenus', 'modules'];
+    for (const f of nonAgentFields) {
+      delete data[f];
+    }
+
     const keys = Object.keys(data);
     const values = keys.map(k => data[k]);
     
@@ -493,6 +587,31 @@ router.put('/agents/:id', authMiddleware, async (req, res) => {
 router.delete('/agents/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (req.user?.id) {
+      const requestor = await query('SELECT agent_type, team_id FROM agents WHERE id = $1', [req.user.id]);
+      if (requestor.rows.length > 0) {
+        const reqType = requestor.rows[0].agent_type;
+        const reqTeamId = requestor.rows[0].team_id;
+
+        if (!['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(reqType)) {
+          return res.status(403).json({ message: 'Sem permissão para excluir agentes' });
+        }
+
+        if (reqType === 'supervisor' || reqType === 'sales_supervisor') {
+          const targetAgent = await query('SELECT supervisor_id, agent_type FROM agents WHERE id = $1', [id]);
+          if (targetAgent.rows.length > 0) {
+            if (targetAgent.rows[0].supervisor_id !== req.user.id) {
+              return res.status(403).json({ message: 'Supervisores só podem excluir seus próprios vendedores' });
+            }
+            if (['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(targetAgent.rows[0].agent_type)) {
+              return res.status(403).json({ message: 'Supervisores não podem excluir agentes deste tipo' });
+            }
+          }
+        }
+      }
+    }
+
     const result = await query('DELETE FROM agents WHERE id = $1 RETURNING id, name, email', [id]);
     
     if (result.rows.length === 0) {
@@ -513,7 +632,7 @@ router.post('/agents/filter', authMiddleware, async (req, res) => {
     const values = Object.values(filters);
     
     let sql = `
-      SELECT id, name, cpf, email, agent_type, team_id, skills, active, 
+      SELECT id, name, cpf, email, agent_type, team_id, supervisor_id, skills, active, 
              photo_url, permissions, level, online, capacity, working_hours, 
              queue_ids, work_unit, role, erp_agent_id, created_at, updated_at
       FROM agents
@@ -538,6 +657,27 @@ router.post('/agents/:id/reset-password', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
+
+    if (req.user?.id) {
+      const requestor = await query('SELECT agent_type, team_id FROM agents WHERE id = $1', [req.user.id]);
+      if (requestor.rows.length > 0) {
+        const reqType = requestor.rows[0].agent_type;
+        if (!['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(reqType)) {
+          return res.status(403).json({ message: 'Sem permissão para redefinir senhas' });
+        }
+        if (reqType === 'supervisor' || reqType === 'sales_supervisor') {
+          const targetAgent = await query('SELECT supervisor_id, agent_type FROM agents WHERE id = $1', [id]);
+          if (targetAgent.rows.length > 0) {
+            if (targetAgent.rows[0].supervisor_id !== req.user.id) {
+              return res.status(403).json({ message: 'Supervisores só podem redefinir senhas de seus próprios vendedores' });
+            }
+            if (['admin', 'coordinator', 'supervisor', 'sales_supervisor'].includes(targetAgent.rows[0].agent_type)) {
+              return res.status(403).json({ message: 'Supervisores não podem redefinir senhas de agentes deste tipo' });
+            }
+          }
+        }
+      }
+    }
     
     if (!newPassword) {
       return res.status(400).json({ message: 'New password is required' });
@@ -571,14 +711,23 @@ router.get('/system-settings', optionalAuth, async (req, res, next) => {
   return crud.list(req, res);
 });
 
+const ALLOWED_SORT_FIELDS = new Set([
+  'created_at', 'updated_at', 'name', 'email', 'stage', 'status', 'priority',
+  'contact_name', 'razao_social', 'nome_fantasia', 'value', 'monthly_value',
+  'scheduled_at', 'due_date', 'agent_id', 'team_id', 'id'
+]);
+
 function normalizeSort(sort) {
   const field = sort.startsWith('-') ? sort.slice(1) : sort;
   const dir = sort.startsWith('-') ? 'DESC' : 'ASC';
   const aliases = {
     'createdDate': 'created_at', 'createdAt': 'created_at', 'created_date': 'created_at',
-    'updatedDate': 'updated_at', 'updatedAt': 'updated_at', 'updated_date': 'updated_at'
+    'updatedDate': 'updated_at', 'updatedAt': 'updated_at', 'updated_date': 'updated_at',
+    'scheduledAt': 'scheduled_at', 'dueDate': 'due_date'
   };
-  return { field: aliases[field] || field.replace(/([A-Z])/g, '_$1').toLowerCase(), dir };
+  const resolved = aliases[field] || field.replace(/([A-Z])/g, '_$1').toLowerCase();
+  const safeField = ALLOWED_SORT_FIELDS.has(resolved) ? resolved : 'created_at';
+  return { field: safeField, dir };
 }
 
 router.get('/leads', authMiddleware, async (req, res) => {
@@ -762,7 +911,35 @@ router.get('/leads-pj', authMiddleware, async (req, res) => {
   try {
     const { sort = '-created_at', limit = 10000 } = req.query;
     const { field: sortField, dir: sortDir } = normalizeSort(sort);
-    const result = await query(`SELECT * FROM leads_pj ORDER BY ${sortField} ${sortDir} LIMIT $1`, [parseInt(limit)]);
+
+    let sql = `SELECT * FROM leads_pj`;
+    const params = [];
+
+    if (req.user?.id) {
+      const agentResult = await query('SELECT agent_type, team_id, id FROM agents WHERE id = $1', [req.user.id]);
+      if (agentResult.rows.length === 0) {
+        return res.json([]);
+      }
+      const agentType = agentResult.rows[0].agent_type;
+      if (agentType === 'supervisor' || agentType === 'sales_supervisor') {
+        const subordinates = await query('SELECT id FROM agents WHERE supervisor_id = $1', [req.user.id]);
+        const ids = subordinates.rows.map(r => r.id);
+        ids.push(req.user.id);
+        const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+        sql += ` WHERE agent_id::text IN (${placeholders})`;
+        params.push(...ids);
+      } else if (!['admin', 'coordinator'].includes(agentType)) {
+        sql += ` WHERE agent_id::text = $1`;
+        params.push(req.user.id);
+      }
+    } else {
+      return res.json([]);
+    }
+
+    sql += ` ORDER BY ${sortField} ${sortDir} LIMIT $${params.length + 1}`;
+    params.push(parseInt(limit));
+
+    const result = await query(sql, params);
     res.json(result.rows.map(convertKeysToCamel));
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1131,9 +1308,13 @@ router.delete('/activities/:id', authMiddleware, async (req, res) => {
   try {
     const existing = await query('SELECT created_by, google_event_id FROM activities WHERE id = $1', [req.params.id]);
     if (existing.rows.length > 0 && existing.rows[0].google_event_id && existing.rows[0].created_by) {
-      console.log('[GCal Hook] Deleting Google event (PF)', existing.rows[0].google_event_id);
-      deleteGoogleEvent(existing.rows[0].created_by, existing.rows[0].google_event_id)
-        .catch(err => console.error('[GCal Hook] delete error (PF):', err.message));
+      enqueueGcalOp({
+        agentId: existing.rows[0].created_by,
+        activityId: null,
+        activityTable: 'activities',
+        op: 'delete',
+        payload: { google_event_id: existing.rows[0].google_event_id },
+      });
     }
     const result = await query('DELETE FROM activities WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
@@ -1178,14 +1359,19 @@ router.put('/activities/:id', authMiddleware, async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
     const activity = result.rows[0];
 
-    if (activity.google_event_id && activity.created_by) {
-      console.log('[GCal Hook] Updating Google event (PF)', activity.google_event_id);
-      updateGoogleEvent(activity.created_by, activity.google_event_id, {
-        type: activity.type,
-        description: activity.title || activity.description,
-        scheduled_at: activity.scheduled_at,
-        completed: activity.completed,
-      }).catch(err => console.error('[GCal Hook] update error (PF):', err.message));
+    if (activity.id && activity.created_by) {
+      enqueueGcalOp({
+        agentId: activity.created_by,
+        activityId: activity.id,
+        activityTable: 'activities',
+        op: 'update',
+        payload: {
+          type: activity.type,
+          description: activity.title || activity.description,
+          scheduled_at: activity.scheduled_at,
+          completed: activity.completed,
+        },
+      });
     }
 
     res.json(convertKeysToCamel(activity));
@@ -1222,13 +1408,17 @@ router.post('/activities', authMiddleware, async (req, res) => {
     }
 
     if (activity.created_by && activity.scheduled_at) {
-      console.log('[GCal Hook] Creating Google event for activity (PF)', activity.id);
-      createGoogleEvent(activity.created_by, {
-        id: activity.id,
-        type: activity.type,
-        description: activity.title || activity.description,
-        scheduled_at: activity.scheduled_at,
-      }, 'activities').catch(err => console.error('[GCal Hook] create error (PF):', err.message));
+      enqueueGcalOp({
+        agentId: activity.created_by,
+        activityId: activity.id,
+        activityTable: 'activities',
+        op: 'create',
+        payload: {
+          type: activity.type,
+          description: activity.title || activity.description,
+          scheduled_at: activity.scheduled_at,
+        },
+      });
     }
     
     res.status(201).json(convertKeysToCamel(activity));
