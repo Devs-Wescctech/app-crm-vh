@@ -1324,6 +1324,8 @@ UPDATE agent_types SET key = 'supervisor', label = 'Supervisor' WHERE key = 'sal
 -- FASE S1: VÍNCULO DIRETO VENDEDOR → SUPERVISOR
 -- =====================
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES agents(id);
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_agents_user_email ON agents(user_email);
 CREATE INDEX IF NOT EXISTS idx_agents_supervisor_id ON agents(supervisor_id);
 
 UPDATE agents a
