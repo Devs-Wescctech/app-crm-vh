@@ -247,16 +247,6 @@ function isScopeOutdated(grantedScope) {
   return false;
 }
 
-function isScopeOutdated(grantedScope) {
-  if (!grantedScope) return true;
-  // Scope strings from Google are space-separated. We require calendar.events;
-  // the legacy 'calendar' scope (broader) does NOT satisfy this because Google
-  // returns the exact scope the user consented to. Flag as outdated whenever
-  // the canonical 'calendar.events' string is missing.
-  const scopes = grantedScope.split(/\s+/);
-  return !scopes.includes(GCAL_SCOPE);
-}
-
 export async function getAgentConnectionStatus(agentId) {
   const configured = isConfiguredViaEnv();
 
