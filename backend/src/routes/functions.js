@@ -4551,14 +4551,32 @@ router.get('/google-calendar/auth-url', authMiddleware, loadAgentMiddleware, asy
   }
 });
 
+// Resolve the public-facing URL the browser uses to reach the app, so the
+// OAuth popup can redirect back to /settings on the same origin. Order:
+//   1. PUBLIC_URL / FRONTEND_URL env vars (explicit override)
+//   2. REPLIT_DEV_DOMAIN (Replit preview)
+//   3. Request's own origin (works for any reverse-proxied prod deploy
+//      where the Host + X-Forwarded-Proto headers are set)
+//   4. localhost:5173 (last-resort dev fallback)
+function resolveFrontendUrl(req) {
+  const explicit = process.env.PUBLIC_URL || process.env.FRONTEND_URL;
+  if (explicit) return explicit.replace(/\/$/, '');
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  const host = req.get('host');
+  if (host) {
+    const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    return `${proto}://${host}`;
+  }
+  return 'http://localhost:5173';
+}
+
 router.get('/google-calendar/callback', async (req, res) => {
+  const frontendUrl = resolveFrontendUrl(req);
   try {
     const { code, state, error: oauthError } = req.query;
     if (oauthError) {
       console.error('[Google Calendar] OAuth error:', oauthError);
-      const frontendUrl = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5173';
-      return res.redirect(`${frontendUrl}/settings?gcal=error&reason=${oauthError}`);
+      return res.redirect(`${frontendUrl}/Settings?gcal=error&reason=${encodeURIComponent(oauthError)}`);
     }
     if (!code || !state) {
       return res.status(400).send('Código de autorização não encontrado.');
@@ -4571,14 +4589,10 @@ router.get('/google-calendar/callback', async (req, res) => {
 
     await syncGoogleToSalesTwo(agentId);
 
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/settings?gcal=connected`);
+    res.redirect(`${frontendUrl}/Settings?gcal=connected`);
   } catch (error) {
     console.error('[Google Calendar] Callback error:', error.message);
-    const frontendUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/settings?gcal=error&reason=${encodeURIComponent(error.message)}`);
+    res.redirect(`${frontendUrl}/Settings?gcal=error&reason=${encodeURIComponent(error.message)}`);
   }
 });
 
