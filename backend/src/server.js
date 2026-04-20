@@ -55,6 +55,14 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/proposals', express.static(path.join(__dirname, '../public/proposals')));
 app.use(express.static(distPath));
 
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  next();
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api', entityRoutes);
 app.use('/api/upload', uploadRoutes);
