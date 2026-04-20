@@ -20,10 +20,11 @@ export default function Settings() {
     queryFn: () => base44.auth.me(),
   });
 
-  const { data: settings = [] } = useQuery({
+  const { data: settings = [], isLoading: settingsLoading } = useQuery({
     queryKey: ['systemSettings'],
     queryFn: () => base44.entities.SystemSettings.list(),
-    initialData: [],
+    staleTime: 1000 * 30,
+    refetchOnMount: 'always',
   });
 
   const createOrUpdateSettingMutation = useMutation({
@@ -179,11 +180,16 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     setOptions([...options, trimmed]);
     setNewOption("");
     setDirty(true);
+    toast.success(`"${trimmed}" adicionado — clique em Salvar para confirmar`);
   };
 
   const handleRemove = (index) => {
+    const removed = options[index];
     setOptions(options.filter((_, i) => i !== index));
     setDirty(true);
+    if (removed) {
+      toast.success(`"${removed}" removido — clique em Salvar para confirmar`);
+    }
   };
 
   const handleSave = async () => {
