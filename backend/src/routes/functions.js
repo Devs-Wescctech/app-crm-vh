@@ -4570,29 +4570,73 @@ function resolveFrontendUrl(req) {
   return 'http://localhost:5173';
 }
 
+function renderPopupClose({ status, message, frontendUrl }) {
+  const safeMessage = String(message || '').replace(/[<>&"']/g, (c) => ({
+    '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+  const safeStatus = status === 'connected' ? 'connected' : 'error';
+  const fallbackUrl = `${frontendUrl}/Settings?gcal=${safeStatus}${
+    safeStatus === 'error' && message ? `&reason=${encodeURIComponent(message)}` : ''
+  }`;
+  const title = safeStatus === 'connected' ? 'Conectado!' : 'Falha na conexão';
+  const body = safeStatus === 'connected'
+    ? 'Google Agenda conectado com sucesso. Esta janela vai fechar automaticamente.'
+    : `Não foi possível conectar: ${safeMessage}`;
+  return `<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><title>${title}</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f6f5f7;color:#222;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:24px;text-align:center}
+  .card{max-width:420px;background:#fff;border-radius:12px;padding:28px;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+  h1{margin:0 0 8px;font-size:20px;color:${safeStatus === 'connected' ? '#5A2A3C' : '#b91c1c'}}
+  p{margin:0;font-size:14px;line-height:1.5;color:#555}
+  a{color:#5A2A3C;text-decoration:underline}
+</style></head><body>
+<div class="card">
+  <h1>${title}</h1>
+  <p>${body}</p>
+  <p style="margin-top:12px;font-size:12px;color:#999">Se a janela não fechar, <a href="${fallbackUrl}">clique aqui</a>.</p>
+</div>
+<script>
+  (function(){
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ source: 'gcal-oauth', status: ${JSON.stringify(safeStatus)}, message: ${JSON.stringify(safeMessage)} }, '*');
+      }
+    } catch (e) {}
+    setTimeout(function(){
+      try { window.close(); } catch (e) {}
+      setTimeout(function(){
+        if (!window.closed) { window.location.href = ${JSON.stringify(fallbackUrl)}; }
+      }, 600);
+    }, 400);
+  })();
+</script>
+</body></html>`;
+}
+
 router.get('/google-calendar/callback', async (req, res) => {
   const frontendUrl = resolveFrontendUrl(req);
   try {
     const { code, state, error: oauthError } = req.query;
     if (oauthError) {
       console.error('[Google Calendar] OAuth error:', oauthError);
-      return res.redirect(`${frontendUrl}/Settings?gcal=error&reason=${encodeURIComponent(oauthError)}`);
+      return res.status(200).type('html').send(renderPopupClose({ status: 'error', message: oauthError, frontendUrl }));
     }
     if (!code || !state) {
-      return res.status(400).send('Código de autorização não encontrado.');
+      return res.status(400).type('html').send(renderPopupClose({ status: 'error', message: 'Código de autorização não encontrado.', frontendUrl }));
     }
     const agentId = await validateOAuthState(state);
     if (!agentId) {
-      return res.status(403).send('Estado OAuth inválido. Tente conectar novamente.');
+      return res.status(403).type('html').send(renderPopupClose({ status: 'error', message: 'Estado OAuth inválido. Tente conectar novamente.', frontendUrl }));
     }
     await handleCallback(code, agentId);
 
     await syncGoogleToSalesTwo(agentId);
 
-    res.redirect(`${frontendUrl}/Settings?gcal=connected`);
+    res.status(200).type('html').send(renderPopupClose({ status: 'connected', message: '', frontendUrl }));
   } catch (error) {
     console.error('[Google Calendar] Callback error:', error.message);
-    res.redirect(`${frontendUrl}/Settings?gcal=error&reason=${encodeURIComponent(error.message)}`);
+    res.status(200).type('html').send(renderPopupClose({ status: 'error', message: error.message, frontendUrl }));
   }
 });
 

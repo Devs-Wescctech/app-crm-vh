@@ -346,15 +346,37 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
   }, []);
 
   const pollIntervalRef = useRef(null);
+  const popupRef = useRef(null);
 
   useEffect(() => {
+    const onMessage = (event) => {
+      const data = event?.data;
+      if (!data || data.source !== 'gcal-oauth') return;
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (popupRef.current && !popupRef.current.closed) {
+        try { popupRef.current.close(); } catch { /* ignore */ }
+      }
+      if (data.status === 'connected') {
+        toast.success('Google Calendar conectado com sucesso!');
+        refetchStatus();
+        queryClient.invalidateQueries({ queryKey: ['googleCalendarEvents'] });
+      } else {
+        toast.error('Erro ao conectar: ' + (data.message || 'tente novamente'));
+      }
+      setConnecting(false);
+    };
+    window.addEventListener('message', onMessage);
     return () => {
+      window.removeEventListener('message', onMessage);
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
     };
-  }, []);
+  }, [queryClient, refetchStatus]);
 
   const FRIENDLY_AUTH_ERROR = "A integração pode não estar configurada — fale com o administrador.";
 
@@ -369,6 +391,7 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
       toast.error("Permita pop-ups para este site para conectar sua conta Google.");
       return;
     }
+    popupRef.current = popup;
     setConnecting(true);
     try {
       const token = localStorage.getItem("accessToken");
