@@ -131,28 +131,28 @@ export default function Settings() {
 }
 
 function OptionListEditor({ title, description, settingKey, settings, onSave }) {
-  const getOptions = () => {
+  const savedJson = (() => {
     const setting = settings.find(s => s.setting_key === settingKey || s.settingKey === settingKey);
-    if (setting) {
-      try { return JSON.parse(setting.setting_value || setting.settingValue); } catch {}
-    }
-    return [];
-  };
+    return setting ? (setting.setting_value ?? setting.settingValue ?? '') : '';
+  })();
 
   const [options, setOptions] = useState([]);
-  const [initialized, setInitialized] = useState(false);
   const [newOption, setNewOption] = useState("");
   const [saving, setSaving] = useState(false);
+  const lastSyncedJsonRef = useRef(null);
 
   useEffect(() => {
-    if (!initialized && settings.length > 0) {
-      const loaded = getOptions();
-      if (loaded.length > 0) {
-        setOptions(loaded);
-        setInitialized(true);
-      }
+    if (lastSyncedJsonRef.current === savedJson) return;
+    lastSyncedJsonRef.current = savedJson;
+    let parsed = [];
+    if (savedJson) {
+      try {
+        const candidate = JSON.parse(savedJson);
+        if (Array.isArray(candidate)) parsed = candidate;
+      } catch {}
     }
-  }, [settings, initialized]);
+    setOptions(parsed);
+  }, [savedJson]);
 
   const handleAdd = () => {
     const trimmed = newOption.trim();
