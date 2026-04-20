@@ -295,16 +295,23 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
   const [connecting, setConnecting] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data: gcalStatus, refetch: refetchStatus } = useQuery({
+  const { data: gcalStatus, refetch: refetchStatus, isError: gcalStatusError } = useQuery({
     queryKey: ["gcalStatus"],
     queryFn: async () => {
       const token = localStorage.getItem("accessToken");
       const res = await fetch("/api/functions/google-calendar/status", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return { configured: false, connected: false };
+      if (!res.ok) {
+        // Surface the error to react-query instead of silently degrading to
+        // { configured: false }. Otherwise a backend outage looks identical to
+        // a missing-credentials situation and the connect button disappears
+        // for the wrong reason.
+        throw new Error(`status ${res.status}`);
+      }
       return res.json();
     },
+    retry: 1,
   });
 
   useEffect(() => {
@@ -590,6 +597,18 @@ function GoogleCalendarSettings({ settings, onSave, isAdmin, showSystemStatus = 
                     </p>
                     <p className="text-xs text-amber-700 mt-0.5">
                       Agora você pode conectar a sua conta Google para sincronizar sua agenda.
+                    </p>
+                  </div>
+                </>
+              ) : gcalStatusError ? (
+                <>
+                  <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-red-600">
+                      Não foi possível verificar o status da integração com o Google Calendar.
+                    </p>
+                    <p className="text-xs text-red-500 mt-0.5">
+                      O servidor não respondeu. Recarregue a página em alguns instantes ou contate o administrador se o problema persistir.
                     </p>
                   </div>
                 </>
