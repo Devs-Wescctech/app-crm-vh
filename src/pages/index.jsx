@@ -17,6 +17,7 @@ import LeadPJDetail from "./LeadPJDetail";
 import AutomationLogs from "./AutomationLogs";
 
 import SalesAgenda from "./SalesAgenda";
+import AgendasPanel from "./AgendasPanel";
 import SalesTasks from "./SalesTasks";
 import ProposalTemplates from "./ProposalTemplates";
 
@@ -71,6 +72,7 @@ const PAGES = {
     AutomationLogs: AutomationLogs,
 
     SalesAgenda: SalesAgenda,
+    AgendasPanel: AgendasPanel,
     SalesTasks: SalesTasks,
     ProposalTemplates: ProposalTemplates,
 
@@ -123,6 +125,7 @@ function PagesContent() {
                 <Route path="/AutomationLogs" element={<AutomationLogs />} />
 
                 <Route path="/SalesAgenda" element={<SalesAgenda />} />
+                <Route path="/AgendasPanel" element={<AgendasPanel />} />
                 <Route path="/SalesTasks" element={<SalesTasks />} />
                 <Route path="/ProposalTemplates" element={<ProposalTemplates />} />
 

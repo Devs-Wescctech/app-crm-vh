@@ -107,6 +107,7 @@ const menuModules = [
       { title: "Novo Lead PJ", url: createPageUrl("NewLeadPJ"), icon: Plus, highlight: true },
       { title: "Pipeline B2B", url: createPageUrl("LeadsPJKanban"), icon: TrendingUp },
       { title: "Agenda", url: createPageUrl("SalesAgenda"), icon: CalendarIcon },
+      { title: "Painel de Agendas", url: createPageUrl("AgendasPanel"), icon: CalendarIcon, supervisorOnly: true },
       { title: "Busca de Leads", url: createPageUrl("LeadPJSearch"), icon: Search },
       { title: "Relatórios", url: createPageUrl("SalesPJReports"), icon: FileBarChart, supervisorOnly: true },
       { title: "Rel. de Ganhos", url: createPageUrl("SalesPJWonReport"), icon: Trophy },
