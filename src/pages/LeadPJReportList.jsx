@@ -249,7 +249,7 @@ export default function LeadPJReportList() {
 
   const visibleAgents = useMemo(
     () =>
-      getVisibleAgentsForFilter(currentAgent, allAgents).filter(
+      getVisibleAgentsForFilter(currentAgent, allAgents, teams).filter(
         (a) => (a.agent_type || a.agentType) === "sales"
       ),
     [currentAgent, allAgents]

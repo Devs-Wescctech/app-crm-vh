@@ -66,7 +66,7 @@ export default function SalesPJDashboard() {
   const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
 
   const { data: rawLeads = [] } = useQuery({
-    queryKey: ['leads-pj-dashboard', getDataVisibilityKey(user, currentAgent)],
+    queryKey: ['leads-pj-dashboard', getDataVisibilityKey(user, currentAgent), teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
@@ -104,7 +104,7 @@ export default function SalesPJDashboard() {
   });
 
   const visibleAgents = useMemo(() => {
-    return getVisibleAgentsForFilter(currentAgent, agents);
+    return getVisibleAgentsForFilter(currentAgent, agents, teams);
   }, [currentAgent, agents]);
 
   const visibleTeamsList = useMemo(() => {

@@ -552,7 +552,7 @@ export default function LeadsPJKanban() {
   const isAdmin = hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent);
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leadsPJ', getDataVisibilityKey(user, currentAgent), allAgents.length],
+    queryKey: ['leadsPJ', getDataVisibilityKey(user, currentAgent), allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-created_at');
       
@@ -594,7 +594,7 @@ export default function LeadsPJKanban() {
   }, [leadsPJ]);
 
   const salesAgents = useMemo(() => {
-    return getVisibleAgentsForFilter(currentAgent, allAgents);
+    return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
   }, [currentAgent, allAgents]);
 
   const visibleTeamsList = useMemo(() => {

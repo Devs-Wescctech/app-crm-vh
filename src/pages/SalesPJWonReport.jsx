@@ -66,7 +66,7 @@ export default function SalesPJWonReport() {
   });
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leads-pj-won-report', getDataVisibilityKey(user, currentAgent), allAgents.length],
+    queryKey: ['leads-pj-won-report', getDataVisibilityKey(user, currentAgent), allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate', 10000);
       const wonLeads = allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
@@ -105,7 +105,7 @@ export default function SalesPJWonReport() {
   }, [leadsPJ]);
 
   const visibleAgents = useMemo(() => {
-    return getVisibleAgentsForFilter(currentAgent, allAgents);
+    return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
   }, [currentAgent, allAgents]);
 
   const visibleTeamsList = useMemo(() => {

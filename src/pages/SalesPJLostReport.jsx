@@ -83,7 +83,7 @@ export default function SalesPJLostReport() {
   });
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leads-pj-lost-report', getDataVisibilityKey(user, currentAgent), allAgents.length],
+    queryKey: ['leads-pj-lost-report', getDataVisibilityKey(user, currentAgent), allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate', 10000);
       const lostLeads = allLeads.filter(l => l.lost || l.stage === 'fechado_perdido');
@@ -141,7 +141,7 @@ export default function SalesPJLostReport() {
   }, [leadsPJ]);
 
   const visibleAgents = useMemo(() => {
-    return getVisibleAgentsForFilter(currentAgent, allAgents);
+    return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
   }, [currentAgent, allAgents]);
 
   const visibleTeamsList = useMemo(() => {

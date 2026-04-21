@@ -267,7 +267,7 @@ export function getVisibleTeams(currentAgent, allTeams, allAgents) {
 
   const agentType = currentAgent?.agent_type || currentAgent?.agentType;
   if (isSupervisorType(agentType) && allAgents) {
-    const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+    const visibleIds = getVisibleAgentIds(currentAgent, allAgents, allTeams);
     const teamIds = new Set();
     allAgents
       .filter(a => visibleIds.includes(a.id))
@@ -286,14 +286,14 @@ export function getVisibleTeams(currentAgent, allTeams, allAgents) {
   return [];
 }
 
-export function getVisibleAgentsForFilter(currentAgent, allAgents) {
+export function getVisibleAgentsForFilter(currentAgent, allAgents, allTeams = null) {
   if (!currentAgent) return [];
 
   if (hasFullVisibility(currentAgent)) {
     return allAgents;
   }
 
-  const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+  const visibleIds = getVisibleAgentIds(currentAgent, allAgents, allTeams);
   return allAgents.filter(a => visibleIds.includes(a.id));
 }
 

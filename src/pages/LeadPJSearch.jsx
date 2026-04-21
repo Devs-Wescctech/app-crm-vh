@@ -80,7 +80,7 @@ export default function LeadPJSearch() {
   const isAdmin = hasFullVisibility(currentAgent);
 
   const { data: leadsPJ = [], isLoading } = useQuery({
-    queryKey: ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id, allAgents.length],
+    queryKey: ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id, allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
@@ -397,7 +397,7 @@ export default function LeadPJSearch() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os agentes</SelectItem>
-                    {getVisibleAgentsForFilter(currentAgent, allAgents).map(agent => (
+                    {getVisibleAgentsForFilter(currentAgent, allAgents, teams).map(agent => (
                       <SelectItem key={agent.id} value={agent.id}>
                         {agent.name || agent.fullName || agent.full_name || agent.userEmail || agent.user_email}
                       </SelectItem>

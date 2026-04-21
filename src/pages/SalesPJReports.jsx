@@ -59,7 +59,7 @@ export default function SalesPJReports() {
   const hasPermission = isAdmin || isSupervisor || canAccessReports(currentAgent);
 
   const { data: leadsPJ = [] } = useQuery({
-    queryKey: ['leadsPJ-reports', getDataVisibilityKey(user, currentAgent)],
+    queryKey: ['leadsPJ-reports', getDataVisibilityKey(user, currentAgent), teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate');
       
@@ -76,7 +76,7 @@ export default function SalesPJReports() {
   });
 
   const visibleAgents = useMemo(() => {
-    return getVisibleAgentsForFilter(currentAgent, allAgents);
+    return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
   }, [currentAgent, allAgents]);
 
   const visibleTeamsList = useMemo(() => {
