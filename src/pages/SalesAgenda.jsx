@@ -144,6 +144,12 @@ export default function SalesAgenda() {
     staleTime: 1000 * 60 * 2,
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => base44.entities.Team.list(),
+    staleTime: 1000 * 60 * 5,
+  });
+
   const { data: gcalStatus } = useQuery({
     queryKey: ["gcalStatus"],
     queryFn: async () => {
@@ -265,7 +271,7 @@ export default function SalesAgenda() {
   const myActivities = useMemo(() => {
     if (hasFullVisibility(currentAgent)) return activities;
 
-    const visibleIds = getVisibleAgentIds(currentAgent, agents);
+    const visibleIds = getVisibleAgentIds(currentAgent, agents, teams);
 
     return activities.filter((act) => {
       if (!currentAgent) return true;

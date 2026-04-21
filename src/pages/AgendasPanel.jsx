@@ -390,8 +390,8 @@ export default function AgendasPanel() {
   // Coordenador/Admin: todos os vendedores. Supervisor: apenas seus subordinados.
   const visibleAgentIds = useMemo(() => {
     if (!currentAgent) return [];
-    return getVisibleAgentIds(currentAgent, agents);
-  }, [currentAgent, agents]);
+    return getVisibleAgentIds(currentAgent, agents, teams);
+  }, [currentAgent, agents, teams]);
 
   const visibleSalesAgents = useMemo(() => {
     return agents.filter((a) => {

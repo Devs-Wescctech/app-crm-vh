@@ -557,7 +557,7 @@ export default function LeadsPJKanban() {
       const allLeads = await base44.entities.LeadPJ.list('-created_at');
       
       if (hasFullVisibility(currentAgent) || hasTeamVisibility(currentAgent)) {
-        const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+        const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
         return allLeads.filter(l =>
           !l.lost && !l.concluded &&
           (hasFullVisibility(currentAgent) || visibleIds.includes(l.agentId) || visibleIds.includes(l.agent_id))

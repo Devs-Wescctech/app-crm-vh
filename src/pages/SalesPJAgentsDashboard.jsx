@@ -63,7 +63,7 @@ export default function SalesPJAgentsDashboard() {
   });
 
   const canSeeAllAgents = isAdmin;
-  const visibleAgentIds = useMemo(() => getVisibleAgentIds(currentAgent, agents), [currentAgent, agents]);
+  const visibleAgentIds = useMemo(() => getVisibleAgentIds(currentAgent, agents, teams), [currentAgent, agents, teams]);
   const isLoading = agentsLoading || teamsLoading || leadsLoading;
 
   const teamsForFilter = useMemo(() => {

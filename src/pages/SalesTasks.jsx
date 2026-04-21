@@ -144,6 +144,12 @@ export default function SalesTasks() {
     staleTime: 1000 * 60 * 2,
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => base44.entities.Team.list(),
+    staleTime: 1000 * 60 * 5,
+  });
+
   const currentAgent = user?.agent;
   const isAdmin = hasFullVisibility(currentAgent);
   const isSupervisor = hasTeamVisibility(currentAgent) && !isAdmin;
@@ -161,7 +167,7 @@ export default function SalesTasks() {
     if (hasFullVisibility(currentAgent)) return tasksOnly;
     if (!currentAgent) return [];
 
-    const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+    const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
 
     if (hasTeamVisibility(currentAgent)) {
       return tasksOnly.filter(a => {

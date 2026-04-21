@@ -1045,7 +1045,11 @@ router.delete('/leads-pj/:id', authMiddleware, async (req, res) => {
 
 router.post('/leads-pj/filter', authMiddleware, async (req, res) => {
   try {
-    const filters = convertKeysToSnake(req.body);
+    // Allowlist via filterValidColumns: descarta qualquer chave que não exista
+    // como coluna real em leads_pj, fechando vetor de SQL injection por nome
+    // de coluna controlado pelo cliente.
+    const rawFilters = convertKeysToSnake(req.body);
+    const filters = await filterValidColumns('leads_pj', rawFilters);
     const keys = Object.keys(filters);
     const values = Object.values(filters);
     let sql = 'SELECT * FROM leads_pj';

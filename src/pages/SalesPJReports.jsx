@@ -69,7 +69,7 @@ export default function SalesPJReports() {
 
       if (!currentAgent) return allLeads;
 
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
       return allLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: hasPermission && !!user && (isAdmin || isSupervisor || !!currentAgent),

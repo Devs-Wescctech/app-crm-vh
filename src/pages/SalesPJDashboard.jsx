@@ -76,7 +76,7 @@ export default function SalesPJDashboard() {
       
       if (!currentAgent) return [];
       
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
       if (hasTeamVisibility(currentAgent)) {
         return allLeads.filter(l => 
           visibleIds.includes(l.agentId || l.agent_id)

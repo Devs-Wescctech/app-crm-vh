@@ -74,7 +74,7 @@ export default function SalesPJWonReport() {
       if (isAdmin) return wonLeads;
       if (!currentAgent) return [];
 
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
       return wonLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: !!user && hasPermission && allAgents.length > 0,

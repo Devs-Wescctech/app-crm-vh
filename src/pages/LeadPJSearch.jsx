@@ -70,6 +70,12 @@ export default function LeadPJSearch() {
     staleTime: 0,
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => base44.entities.Team.list(),
+    staleTime: 1000 * 60 * 5,
+  });
+
   const currentAgent = user?.agent || allAgents.find(a => a.userEmail === user?.email || a.user_email === user?.email);
   const isAdmin = hasFullVisibility(currentAgent);
 
@@ -84,7 +90,7 @@ export default function LeadPJSearch() {
 
       if (!currentAgent) return [];
 
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
       return allLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: !!user && !!currentAgent && allAgents.length > 0,

@@ -91,7 +91,7 @@ export default function SalesPJLostReport() {
       if (isAdmin) return lostLeads;
       if (!currentAgent) return [];
 
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents);
+      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
       return lostLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
     },
     enabled: !!user && hasPermission && allAgents.length > 0,
