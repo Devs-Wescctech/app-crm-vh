@@ -288,8 +288,7 @@ for (const [route, options] of Object.entries(entities)) {
       try {
         const visibleIds = await resolveVisibleAgentIds(req.user?.id);
         const { sort = '-scheduled_at', limit = 10000 } = req.query;
-        const sortField = (sort.startsWith('-') ? sort.slice(1) : sort).replace(/[^a-z0-9_]/gi, '');
-        const sortDir = sort.startsWith('-') ? 'DESC' : 'ASC';
+        const { field: sortField, dir: sortDir } = normalizeSort(sort);
 
         let sql = 'SELECT * FROM activities_pj';
         const params = [];
