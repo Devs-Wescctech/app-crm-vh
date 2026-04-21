@@ -441,7 +441,10 @@ export default function AgendasPanel() {
       try { scheduled = parseISO(scheduledAt); } catch { return false; }
       if (!scheduled || !isValid(scheduled)) return false;
 
-      if (dateRange && !isWithinInterval(scheduled, dateRange)) return false;
+      if (dateRange?.from && dateRange?.to &&
+          !isWithinInterval(scheduled, { start: dateRange.from, end: dateRange.to })) {
+        return false;
+      }
 
       const vendedor = resolveAssignedAgent(act);
       const vendedorId = vendedor?.id;
