@@ -394,7 +394,14 @@ export default function AgendasPanel() {
   }, [currentAgent, agents]);
 
   const visibleSalesAgents = useMemo(() => {
-    return agents.filter((a) => visibleAgentIds.includes(a.id));
+    return agents.filter((a) => {
+      if (!visibleAgentIds.includes(a.id)) return false;
+      // Filtro de vendedor: exclui perfis de gestão (supervisor/coordinator/admin),
+      // mantendo apenas vendedores propriamente ditos (sales/pre_sales/etc).
+      const t = a.agentType || a.agent_type;
+      if (t === "admin" || t === "coordinator" || isSupervisorType(t)) return false;
+      return true;
+    });
   }, [agents, visibleAgentIds]);
 
   const supervisorsList = useMemo(() => {
