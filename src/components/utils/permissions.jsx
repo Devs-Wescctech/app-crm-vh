@@ -211,8 +211,13 @@ export function getVisibleAgentIds(currentAgent, allAgents) {
 
   const agentType = currentAgent?.agent_type || currentAgent?.agentType;
   if (isSupervisorType(agentType)) {
+    const myTeamId = currentAgent.teamId || currentAgent.team_id;
     const ids = allAgents
-      .filter(a => (a.supervisorId || a.supervisor_id) === currentAgent.id)
+      .filter(a => {
+        const supId = a.supervisorId || a.supervisor_id;
+        const tId = a.teamId || a.team_id;
+        return supId === currentAgent.id || (myTeamId && tId === myTeamId);
+      })
       .map(a => a.id);
     if (!ids.includes(currentAgent.id)) {
       ids.push(currentAgent.id);

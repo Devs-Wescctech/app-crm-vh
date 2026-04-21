@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isWithinInterval } from "date-fns";
+import { format, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isWithinInterval, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, Filter, Search, X, Users, Building2, User as UserIcon, Clock, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
@@ -190,6 +190,7 @@ function FormattedDateTime({ date }) {
   if (!date) return <span className="text-gray-400">—</span>;
   let d;
   try { d = typeof date === "string" ? parseISO(date) : date; } catch { return <span className="text-gray-400">—</span>; }
+  if (!d || !isValid(d)) return <span className="text-gray-400">—</span>;
   return (
     <div className="flex flex-col leading-tight">
       <span className="font-medium text-gray-900 dark:text-gray-100">{format(d, "dd/MM/yyyy", { locale: ptBR })}</span>
@@ -204,7 +205,8 @@ function FormattedDateTime({ date }) {
 function AgendaDetailsModal({ activity, lead, vendedor, supervisor, onClose }) {
   if (!activity) return null;
   const scheduledAt = getVal(activity, "scheduledAt", "scheduled_at");
-  const scheduled = scheduledAt ? parseISO(scheduledAt) : null;
+  let scheduled = scheduledAt ? parseISO(scheduledAt) : null;
+  if (scheduled && !isValid(scheduled)) scheduled = null;
   const duration = getVal(activity, "duration", "durationMinutes", "duration_minutes");
   const description = getVal(activity, "description");
   const notes = getVal(activity, "notes");
@@ -287,8 +289,8 @@ function AgendaDetailsModal({ activity, lead, vendedor, supervisor, onClose }) {
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Metadados</h3>
               <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-gray-800/40 rounded-lg text-xs">
-                <Field label="Criado em" value={createdAt ? format(parseISO(createdAt), "dd/MM/yyyy HH:mm") : "—"} />
-                <Field label="Atualizado em" value={updatedAt ? format(parseISO(updatedAt), "dd/MM/yyyy HH:mm") : "—"} />
+                <Field label="Criado em" value={(() => { if (!createdAt) return "—"; const d = parseISO(createdAt); return isValid(d) ? format(d, "dd/MM/yyyy HH:mm") : "—"; })()} />
+                <Field label="Atualizado em" value={(() => { if (!updatedAt) return "—"; const d = parseISO(updatedAt); return isValid(d) ? format(d, "dd/MM/yyyy HH:mm") : "—"; })()} />
               </div>
             </section>
           )}
@@ -345,7 +347,7 @@ export default function AgendasPanel() {
     staleTime: 1000 * 60,
   });
 
-  const currentAgent = user?.agent || agents.find((a) => a.email === user?.email);
+  const currentAgent = user?.agent || agents.find((a) => a.userEmail === user?.email || a.email === user?.email);
   const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
   const isCoordinatorOrAdmin = hasFullVisibility(currentAgent);
   const isSupervisor = isSupervisorType(currentAgentType) && !isCoordinatorOrAdmin;
@@ -430,6 +432,7 @@ export default function AgendasPanel() {
       if (!scheduledAt) return false;
       let scheduled;
       try { scheduled = parseISO(scheduledAt); } catch { return false; }
+      if (!scheduled || !isValid(scheduled)) return false;
 
       if (dateRange && !isWithinInterval(scheduled, dateRange)) return false;
 
