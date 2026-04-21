@@ -202,7 +202,7 @@ export function hasTeamVisibility(agent) {
   return false;
 }
 
-export function getVisibleAgentIds(currentAgent, allAgents) {
+export function getVisibleAgentIds(currentAgent, allAgents, allTeams = null) {
   if (!currentAgent) return [];
 
   if (hasFullVisibility(currentAgent)) {
@@ -211,18 +211,36 @@ export function getVisibleAgentIds(currentAgent, allAgents) {
 
   const agentType = currentAgent?.agent_type || currentAgent?.agentType;
   if (isSupervisorType(agentType)) {
-    const myTeamId = currentAgent.teamId || currentAgent.team_id;
-    const ids = allAgents
-      .filter(a => {
-        const supId = a.supervisorId || a.supervisor_id;
-        const tId = a.teamId || a.team_id;
-        return supId === currentAgent.id || (myTeamId && tId === myTeamId);
-      })
-      .map(a => a.id);
-    if (!ids.includes(currentAgent.id)) {
-      ids.push(currentAgent.id);
+    // REGRA ESTRITA (causa raiz do vazamento corrigido): supervisor enxerga
+    // apenas agentes em que `supervisor_id` é o seu próprio id. Não usar
+    // `team_id` como fallback porque um time pode ter VÁRIOS supervisores
+    // (ex.: time "Vendas" com Supervisor A e Supervisor B), e isso fazia
+    // cada supervisor ver os subordinados do outro.
+    const idsBySupervisor = new Set(
+      allAgents
+        .filter(a => (a.supervisorId || a.supervisor_id) === currentAgent.id)
+        .map(a => a.id)
+    );
+
+    // Fallback OPCIONAL: se a página passou `allTeams` e existe um time cujo
+    // `supervisor_id` é o currentAgent (ou seja, o supervisor é o "dono"
+    // declarado do time), inclui também os membros desse time.
+    if (Array.isArray(allTeams)) {
+      const ownedTeamIds = new Set(
+        allTeams
+          .filter(t => (t.supervisorId || t.supervisor_id) === currentAgent.id)
+          .map(t => t.id)
+      );
+      if (ownedTeamIds.size > 0) {
+        for (const a of allAgents) {
+          const tId = a.teamId || a.team_id;
+          if (tId && ownedTeamIds.has(tId)) idsBySupervisor.add(a.id);
+        }
+      }
     }
-    return ids;
+
+    idsBySupervisor.add(currentAgent.id);
+    return Array.from(idsBySupervisor);
   }
 
   if (hasTeamVisibility(currentAgent)) {

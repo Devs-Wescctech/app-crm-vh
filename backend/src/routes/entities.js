@@ -17,6 +17,54 @@ import { enqueueGcalOp } from '../services/gcalOutboxService.js';
 
 const router = Router();
 
+/**
+ * Defesa em profundidade: resolve a lista de agent_ids que o usuário logado
+ * pode enxergar, espelhando a regra do frontend (src/components/utils/permissions.jsx).
+ *
+ * Regras:
+ *  - admin / coordinator: null  → significa "sem filtro" (vê tudo)
+ *  - supervisor / *_supervisor: subordinados (agents.supervisor_id == eu)
+ *      + se o supervisor for o "dono" de algum time (teams.supervisor_id == eu),
+ *        inclui também os membros desses times
+ *      + sempre inclui o próprio id
+ *  - demais perfis: apenas o próprio id
+ *
+ * Retorna null para "sem restrição" e [] explicitamente quando o usuário
+ * não tem visibilidade alguma.
+ */
+async function resolveVisibleAgentIds(userId) {
+  if (!userId) return [];
+  const me = await query('SELECT id, agent_type FROM agents WHERE id = $1', [userId]);
+  if (me.rows.length === 0) return [];
+  const agentType = me.rows[0].agent_type;
+
+  if (agentType === 'admin' || agentType === 'coordinator') return null;
+
+  const isSupervisor =
+    agentType === 'supervisor' ||
+    agentType === 'sales_supervisor' ||
+    (typeof agentType === 'string' && agentType.endsWith('_supervisor'));
+
+  if (isSupervisor) {
+    const subs = await query('SELECT id FROM agents WHERE supervisor_id = $1', [userId]);
+    const ids = new Set(subs.rows.map(r => r.id));
+    const ownedTeams = await query('SELECT id FROM teams WHERE supervisor_id = $1', [userId]);
+    if (ownedTeams.rows.length > 0) {
+      const teamIds = ownedTeams.rows.map(r => r.id);
+      const placeholders = teamIds.map((_, i) => `$${i + 1}`).join(',');
+      const teamMembers = await query(
+        `SELECT id FROM agents WHERE team_id IN (${placeholders})`,
+        teamIds
+      );
+      teamMembers.rows.forEach(r => ids.add(r.id));
+    }
+    ids.add(userId);
+    return Array.from(ids);
+  }
+
+  return [userId];
+}
+
 function snakeToCamel(str) {
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
@@ -234,7 +282,35 @@ for (const [route, options] of Object.entries(entities)) {
   }
 
   if (route === 'activities-pj') {
-    router.get(`/${route}`, authMiddleware, crud.list);
+    // Defesa em profundidade: filtra atividades pelos leads cujo agent_id é
+    // visível ao supervisor logado. Admin/coordenador → sem filtro.
+    router.get(`/${route}`, authMiddleware, async (req, res) => {
+      try {
+        const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+        const { sort = '-scheduled_at', limit = 10000 } = req.query;
+        const sortField = (sort.startsWith('-') ? sort.slice(1) : sort).replace(/[^a-z0-9_]/gi, '');
+        const sortDir = sort.startsWith('-') ? 'DESC' : 'ASC';
+
+        let sql = 'SELECT * FROM activities_pj';
+        const params = [];
+        if (visibleIds === null) {
+          // sem restrição
+        } else if (visibleIds.length === 0) {
+          return res.json([]);
+        } else {
+          const placeholders = visibleIds.map((_, i) => `$${i + 1}`).join(',');
+          sql += ` WHERE lead_id IN (SELECT id FROM leads_pj WHERE agent_id::text IN (${placeholders}))`;
+          params.push(...visibleIds);
+        }
+        params.push(parseInt(limit));
+        sql += ` ORDER BY ${sortField} ${sortDir} LIMIT $${params.length}`;
+        const result = await query(sql, params);
+        res.json(result.rows.map(convertKeysToCamel));
+      } catch (error) {
+        console.error('Error listing activities-pj with visibility:', error);
+        res.status(500).json({ message: error.message });
+      }
+    });
     router.get(`/${route}/:id`, authMiddleware, crud.get);
 
     router.post(`/${route}`, authMiddleware, async (req, res) => {
@@ -912,28 +988,17 @@ router.get('/leads-pj', authMiddleware, async (req, res) => {
     const { sort = '-created_at', limit = 10000 } = req.query;
     const { field: sortField, dir: sortDir } = normalizeSort(sort);
 
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
     let sql = `SELECT * FROM leads_pj`;
     const params = [];
-
-    if (req.user?.id) {
-      const agentResult = await query('SELECT agent_type, team_id, id FROM agents WHERE id = $1', [req.user.id]);
-      if (agentResult.rows.length === 0) {
-        return res.json([]);
-      }
-      const agentType = agentResult.rows[0].agent_type;
-      if (agentType === 'supervisor' || agentType === 'sales_supervisor') {
-        const subordinates = await query('SELECT id FROM agents WHERE supervisor_id = $1', [req.user.id]);
-        const ids = subordinates.rows.map(r => r.id);
-        ids.push(req.user.id);
-        const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
-        sql += ` WHERE agent_id::text IN (${placeholders})`;
-        params.push(...ids);
-      } else if (!['admin', 'coordinator'].includes(agentType)) {
-        sql += ` WHERE agent_id::text = $1`;
-        params.push(req.user.id);
-      }
-    } else {
+    if (visibleIds === null) {
+      // admin/coordenador → sem filtro
+    } else if (visibleIds.length === 0) {
       return res.json([]);
+    } else {
+      const placeholders = visibleIds.map((_, i) => `$${i + 1}`).join(',');
+      sql += ` WHERE agent_id::text IN (${placeholders})`;
+      params.push(...visibleIds);
     }
 
     sql += ` ORDER BY ${sortField} ${sortDir} LIMIT $${params.length + 1}`;
@@ -950,7 +1015,19 @@ router.get('/leads-pj/:id', authMiddleware, async (req, res) => {
   try {
     const result = await query('SELECT * FROM leads_pj WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
-    res.json(convertKeysToCamel(result.rows[0]));
+    const lead = result.rows[0];
+
+    // Defesa em profundidade: o usuário só pode acessar o lead se o agent_id
+    // dele estiver na sua lista de visíveis (admin/coord = sem restrição).
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+    if (visibleIds !== null) {
+      const owner = lead.agent_id ? String(lead.agent_id) : null;
+      if (!owner || !visibleIds.includes(owner)) {
+        return res.status(404).json({ message: 'Not found' });
+      }
+    }
+
+    res.json(convertKeysToCamel(lead));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -972,9 +1049,26 @@ router.post('/leads-pj/filter', authMiddleware, async (req, res) => {
     const keys = Object.keys(filters);
     const values = Object.values(filters);
     let sql = 'SELECT * FROM leads_pj';
+    const conditions = [];
     if (keys.length > 0) {
-      const conditions = keys.map((key, i) => `${key} = $${i + 1}`).join(' AND ');
-      sql += ` WHERE ${conditions}`;
+      conditions.push(keys.map((key, i) => `${key} = $${i + 1}`).join(' AND '));
+    }
+
+    // Defesa em profundidade: aplica visibilidade por supervisor.
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+    if (visibleIds === null) {
+      // sem restrição
+    } else if (visibleIds.length === 0) {
+      return res.json([]);
+    } else {
+      const startIdx = values.length + 1;
+      const placeholders = visibleIds.map((_, i) => `$${startIdx + i}`).join(',');
+      conditions.push(`agent_id::text IN (${placeholders})`);
+      values.push(...visibleIds);
+    }
+
+    if (conditions.length > 0) {
+      sql += ` WHERE ${conditions.join(' AND ')}`;
     }
     sql += ' ORDER BY created_at DESC';
     const result = await query(sql, values);
