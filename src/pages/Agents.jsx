@@ -54,6 +54,7 @@ const MENU_MODULES = [
       { id: "NewLeadPJ", title: "Novo Lead PJ" },
       { id: "LeadsPJKanban", title: "Pipeline B2B" },
       { id: "SalesAgenda", title: "Agenda" },
+      { id: "AgendasPanel", title: "Painel de Agendas" },
       { id: "LeadPJSearch", title: "Busca de Leads" },
       { id: "SalesPJReports", title: "Relatórios" },
       { id: "SalesPJWonReport", title: "Rel. de Ganhos" },
