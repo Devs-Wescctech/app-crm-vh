@@ -142,7 +142,7 @@ export default function SalesPJLostReport() {
 
   const visibleAgents = useMemo(() => {
     return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
-  }, [currentAgent, allAgents]);
+  }, [currentAgent, allAgents, teams]);
 
   const visibleTeamsList = useMemo(() => {
     return getVisibleTeams(currentAgent, teams, allAgents);

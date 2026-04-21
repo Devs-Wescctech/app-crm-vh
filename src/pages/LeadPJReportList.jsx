@@ -231,6 +231,12 @@ export default function LeadPJReportList() {
     enabled: !!user,
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ["teams"],
+    queryFn: () => base44.entities.Team.list(),
+    enabled: !!user,
+  });
+
   const currentAgent = user?.agent || allAgents.find(a => a.userEmail === user?.email || a.user_email === user?.email);
 
   const { data: leads = [], isLoading } = useQuery({
@@ -252,7 +258,7 @@ export default function LeadPJReportList() {
       getVisibleAgentsForFilter(currentAgent, allAgents, teams).filter(
         (a) => (a.agent_type || a.agentType) === "sales"
       ),
-    [currentAgent, allAgents]
+    [currentAgent, allAgents, teams]
   );
 
   const filteredLeads = useMemo(() => {
