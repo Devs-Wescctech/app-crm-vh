@@ -759,6 +759,13 @@ ALTER TABLE lead_pj_automations ADD COLUMN IF NOT EXISTS whatsapp_template_id VA
 ALTER TABLE lead_pj_automations ADD COLUMN IF NOT EXISTS whatsapp_template_name VARCHAR(255);
 ALTER TABLE lead_pj_automations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact1_name VARCHAR(255);
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact1_role VARCHAR(255);
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact1_phone VARCHAR(50);
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_name VARCHAR(255);
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_role VARCHAR(255);
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
+
 -- =====================
 -- REFERRAL AUTOMATIONS
 -- =====================

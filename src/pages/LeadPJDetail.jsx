@@ -1401,6 +1401,98 @@ export default function LeadPJDetail() {
                   />
                 </div>
 
+                {/* Contato 1 */}
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                  <Label className="text-gray-900 dark:text-gray-100 font-semibold">Contato 1</Label>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Nome Contato 1</Label>
+                    <Input
+                      value={editedLead.contact1Name !== undefined ? editedLead.contact1Name : (lead.contact1Name || lead.contact1_name || "")}
+                      onChange={(e) => handleFieldChange('contact1Name', e.target.value)}
+                      placeholder="Nome do contato"
+                      className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Cargo Contato 1</Label>
+                    <Input
+                      value={editedLead.contact1Role !== undefined ? editedLead.contact1Role : (lead.contact1Role || lead.contact1_role || "")}
+                      onChange={(e) => handleFieldChange('contact1Role', e.target.value)}
+                      placeholder="Cargo do contato"
+                      className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Telefone Contato 1</Label>
+                    <div className="flex gap-3 mt-1">
+                      <Input
+                        value={editedLead.contact1Phone !== undefined ? editedLead.contact1Phone : (lead.contact1Phone || lead.contact1_phone || "")}
+                        onChange={(e) => handleFieldChange('contact1Phone', e.target.value)}
+                        placeholder="(00) 00000-0000"
+                        className="flex-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      />
+                      {(lead.contact1Phone || lead.contact1_phone) && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            const num = (lead.contact1Phone || lead.contact1_phone).replace(/\D/g, '');
+                            window.open(`https://wa.me/55${num}`, '_blank');
+                          }}
+                        >
+                          <Phone className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Contato 2 */}
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                  <Label className="text-gray-900 dark:text-gray-100 font-semibold">Contato 2</Label>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Nome Contato 2</Label>
+                    <Input
+                      value={editedLead.contact2Name !== undefined ? editedLead.contact2Name : (lead.contact2Name || lead.contact2_name || "")}
+                      onChange={(e) => handleFieldChange('contact2Name', e.target.value)}
+                      placeholder="Nome do contato"
+                      className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Cargo Contato 2</Label>
+                    <Input
+                      value={editedLead.contact2Role !== undefined ? editedLead.contact2Role : (lead.contact2Role || lead.contact2_role || "")}
+                      onChange={(e) => handleFieldChange('contact2Role', e.target.value)}
+                      placeholder="Cargo do contato"
+                      className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 dark:text-gray-400">Telefone Contato 2</Label>
+                    <div className="flex gap-3 mt-1">
+                      <Input
+                        value={editedLead.contact2Phone !== undefined ? editedLead.contact2Phone : (lead.contact2Phone || lead.contact2_phone || "")}
+                        onChange={(e) => handleFieldChange('contact2Phone', e.target.value)}
+                        placeholder="(00) 00000-0000"
+                        className="flex-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      />
+                      {(lead.contact2Phone || lead.contact2_phone) && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            const num = (lead.contact2Phone || lead.contact2_phone).replace(/\D/g, '');
+                            window.open(`https://wa.me/55${num}`, '_blank');
+                          }}
+                        >
+                          <Phone className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <Label className="text-gray-900 dark:text-gray-100">Interesse</Label>
                   <Select 
