@@ -215,19 +215,16 @@ export default function LeadPJDetail() {
 
   const uploadFileMutation = useMutation({
     mutationFn: async (file) => {
-      console.log('[upload] mutationFn start', { name: file?.name, type: file?.type, size: file?.size, leadId });
       const formData = new FormData();
       formData.append('lead_id', leadId);
       formData.append('file', file);
       const token = localStorage.getItem('accessToken');
       const apiUrl = '/api';
-      console.log('[upload] sending fetch', `${apiUrl}/lead-pj-files/upload`, { hasToken: !!token });
       const res = await fetch(`${apiUrl}/lead-pj-files/upload`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
-      console.log('[upload] fetch response', { status: res.status, ok: res.ok });
       if (!res.ok) {
         let message = 'Falha ao enviar arquivo.';
         try { message = (await res.json())?.message || message; } catch (_) {}
@@ -235,15 +232,11 @@ export default function LeadPJDetail() {
       }
       return res.json();
     },
-    onSuccess: (data) => {
-      console.log('[upload] success', data);
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leadPJFiles', leadId] });
       toast.success('Arquivo enviado com segurança!');
     },
-    onError: (err) => {
-      console.error('[upload] error', err);
-      toast.error(err?.message || 'Erro ao enviar arquivo');
-    },
+    onError: (err) => toast.error(err?.message || 'Erro ao enviar arquivo'),
   });
 
   const deleteFileMutation = useMutation({
@@ -256,34 +249,25 @@ export default function LeadPJDetail() {
   });
 
   const handleProposalFileSelected = (e) => {
-    console.log('[upload] onChange fired', { files: e.target.files?.length, leadId });
     const file = e.target.files?.[0];
-    if (!file) {
-      console.warn('[upload] no file in event');
-      return;
-    }
-    console.log('[upload] file selected', { name: file.name, type: file.type, size: file.size });
+    if (!file) return;
 
     const allowedExt = ['jpg', 'jpeg', 'png', 'pdf'];
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if (!allowedExt.includes(ext)) {
-      console.warn('[upload] rejected extension', ext);
       toast.error('Tipo de arquivo não permitido. Apenas .jpg, .png e .pdf.');
       e.target.value = '';
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      console.warn('[upload] file too large', file.size);
-      toast.error('Arquivo excede o limite de 5MB.');
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error(`Arquivo excede o limite de 25MB (atual: ${(file.size / 1024 / 1024).toFixed(1)} MB).`);
       e.target.value = '';
       return;
     }
 
-    console.log('[upload] calling mutate');
     setUploadingFile(true);
     uploadFileMutation.mutate(file, {
       onSettled: () => {
-        console.log('[upload] settled');
         setUploadingFile(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       },
@@ -1275,7 +1259,7 @@ export default function LeadPJDetail() {
                     </CardTitle>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
                       <Shield className="w-3.5 h-3.5" />
-                      Apenas .jpg, .png e .pdf — máx. 5MB. Validados por assinatura de cabeçalho.
+                      Apenas .jpg, .png e .pdf — máx. 25MB. Validados por assinatura de cabeçalho.
                     </p>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-4">

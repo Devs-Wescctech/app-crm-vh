@@ -13,7 +13,7 @@ if (!fs.existsSync(PRIVATE_UPLOAD_DIR)) {
   fs.mkdirSync(PRIVATE_UPLOAD_DIR, { recursive: true, mode: 0o750 });
 }
 
-const MAX_SIZE = 5 * 1024 * 1024;
+const MAX_SIZE = 25 * 1024 * 1024;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -210,7 +210,7 @@ router.post(
     upload.single('file')(req, res, (err) => {
       if (err) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(413).json({ message: 'Arquivo excede o limite de 5MB.' });
+          return res.status(413).json({ message: 'Arquivo excede o limite de 25MB.' });
         }
         return res.status(400).json({ message: err.message || 'Falha no upload.' });
       }
@@ -233,7 +233,7 @@ router.post(
         return res.status(400).json({ message: 'Arquivo vazio.' });
       }
       if (buffer.length > MAX_SIZE) {
-        return res.status(413).json({ message: 'Arquivo excede o limite de 5MB.' });
+        return res.status(413).json({ message: 'Arquivo excede o limite de 25MB.' });
       }
 
       const detected = detectMime(buffer);
