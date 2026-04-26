@@ -8,6 +8,7 @@ import { initDatabase } from './config/database.js';
 import authRoutes from './routes/auth.js';
 import entityRoutes from './routes/entities.js';
 import uploadRoutes from './routes/upload.js';
+import leadPjFilesRoutes from './routes/leadPjFiles.js';
 import functionRoutes from './routes/functions.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import { runAllAutomations } from './services/automationService.js';
@@ -64,6 +65,7 @@ app.use('/api', (req, res, next) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api', leadPjFilesRoutes);
 app.use('/api', entityRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/functions', functionRoutes);

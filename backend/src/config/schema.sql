@@ -767,6 +767,23 @@ ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_role VARCHAR(255);
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
 
 -- =====================
+-- LEAD PJ FILES (Anexos da Proposta)
+-- =====================
+CREATE TABLE IF NOT EXISTS lead_pj_files (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    lead_id UUID NOT NULL REFERENCES leads_pj(id) ON DELETE CASCADE,
+    original_name VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(255) NOT NULL UNIQUE,
+    mime_type VARCHAR(100) NOT NULL,
+    file_size INTEGER NOT NULL,
+    uploaded_by UUID,
+    uploaded_by_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_pj_files_lead_id ON lead_pj_files(lead_id);
+
+-- =====================
 -- REFERRAL AUTOMATIONS
 -- =====================
 CREATE TABLE IF NOT EXISTS referral_automations (

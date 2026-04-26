@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ArrowLeft,
   Phone,
@@ -48,6 +48,9 @@ import {
   Pencil,
   StickyNote,
   X,
+  Upload,
+  Image as ImageIcon,
+  Shield,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -117,6 +120,9 @@ export default function LeadPJDetail() {
   const [newProposalNote, setNewProposalNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
+  const fileInputRef = useRef(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -199,6 +205,129 @@ export default function LeadPJDetail() {
     },
     onError: (err) => toast.error(err?.message || 'Erro ao remover nota'),
   });
+
+  const { data: proposalFiles = [] } = useQuery({
+    queryKey: ['leadPJFiles', leadId],
+    queryFn: () => base44.entities.LeadPJFile.filter({ lead_id: leadId }),
+    enabled: !!leadId,
+    staleTime: 0,
+  });
+
+  const uploadFileMutation = useMutation({
+    mutationFn: async (file) => {
+      const formData = new FormData();
+      formData.append('lead_id', leadId);
+      formData.append('file', file);
+      const token = localStorage.getItem('accessToken');
+      const apiUrl = '/api';
+      const res = await fetch(`${apiUrl}/lead-pj-files/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!res.ok) {
+        let message = 'Falha ao enviar arquivo.';
+        try { message = (await res.json())?.message || message; } catch (_) {}
+        throw new Error(message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadPJFiles', leadId] });
+      toast.success('Arquivo enviado com segurança!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao enviar arquivo'),
+  });
+
+  const deleteFileMutation = useMutation({
+    mutationFn: (id) => base44.entities.LeadPJFile.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadPJFiles', leadId] });
+      toast.success('Arquivo removido!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover arquivo'),
+  });
+
+  const handleProposalFileSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedExt = ['jpg', 'jpeg', 'png', 'pdf'];
+    const allowedMime = ['image/jpeg', 'image/png', 'application/pdf'];
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (!allowedExt.includes(ext) || !allowedMime.includes(file.type)) {
+      toast.error('Tipo de arquivo não permitido. Apenas .jpg, .png e .pdf.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Arquivo excede o limite de 5MB.');
+      e.target.value = '';
+      return;
+    }
+
+    setUploadingFile(true);
+    uploadFileMutation.mutate(file, {
+      onSettled: () => {
+        setUploadingFile(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      },
+    });
+  };
+
+  const buildFileUrl = (file, download = false) => {
+    const token = localStorage.getItem('accessToken');
+    const apiUrl = '/api';
+    const params = new URLSearchParams();
+    if (download) params.set('download', '1');
+    if (token) params.set('access_token', token);
+    const qs = params.toString();
+    return `${apiUrl}/lead-pj-files/${file.id}/download${qs ? `?${qs}` : ''}`;
+  };
+
+  const openFile = async (file, asAttachment = false) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const apiUrl = '/api';
+      const res = await fetch(
+        `${apiUrl}/lead-pj-files/${file.id}/download${asAttachment ? '?download=1' : ''}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (!res.ok) {
+        let message = 'Falha ao abrir arquivo.';
+        try { message = (await res.json())?.message || message; } catch (_) {}
+        toast.error(message);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (asAttachment) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.originalName || 'arquivo';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } else {
+        setPreviewFile({ ...file, blobUrl: url });
+      }
+    } catch (e) {
+      toast.error(e?.message || 'Erro ao abrir arquivo.');
+    }
+  };
+
+  const closePreview = () => {
+    if (previewFile?.blobUrl) URL.revokeObjectURL(previewFile.blobUrl);
+    setPreviewFile(null);
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
 
   const updateLeadMutation = useMutation({
     mutationFn: (data) => base44.entities.LeadPJ.update(leadId, data),
@@ -1121,7 +1250,121 @@ export default function LeadPJDetail() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="proposal" className="mt-6">
+              <TabsContent value="proposal" className="mt-6 space-y-6">
+                {/* ARQUIVOS DA PROPOSTA */}
+                <Card className="bg-white dark:bg-gray-900">
+                  <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+                    <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
+                      <FileText className="w-5 h-5" />
+                      Arquivos da Proposta
+                    </CardTitle>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5" />
+                      Apenas .jpg, .png e .pdf — máx. 5MB. Validados por assinatura de cabeçalho.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="pt-6 space-y-4">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                      className="hidden"
+                      onChange={handleProposalFileSelected}
+                    />
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingFile}
+                        className="bg-indigo-600 hover:bg-indigo-700"
+                      >
+                        {uploadingFile ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Upload className="w-4 h-4 mr-2" />
+                        )}
+                        Enviar arquivo
+                      </Button>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {proposalFiles.length} {proposalFiles.length === 1 ? 'arquivo' : 'arquivos'}
+                      </span>
+                    </div>
+
+                    {proposalFiles.length === 0 ? (
+                      <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+                        <FileText className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                        Nenhum arquivo enviado ainda.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {proposalFiles.map((file) => {
+                          const isImage = file.mimeType?.startsWith('image/');
+                          const isAuthor = currentAgent && String(file.uploadedBy) === String(currentAgent.id);
+                          const canDelete = isAuthor || isAdmin || isCoordinator;
+                          const Icon = isImage ? ImageIcon : FileText;
+                          return (
+                            <div
+                              key={file.id}
+                              className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50"
+                            >
+                              <div className="w-10 h-10 rounded-md bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                                <Icon className="w-5 h-5 text-indigo-600 dark:text-indigo-300" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                                  {file.originalName}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {formatFileSize(file.fileSize)} · {file.uploadedByName || 'Usuário'}
+                                  {file.createdAt && (
+                                    <> · {format(new Date(file.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}</>
+                                  )}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0"
+                                  title="Visualizar"
+                                  onClick={() => openFile(file, false)}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 w-8 p-0"
+                                  title="Baixar"
+                                  onClick={() => openFile(file, true)}
+                                >
+                                  <Download className="w-4 h-4" />
+                                </Button>
+                                {canDelete && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                                    title="Remover"
+                                    onClick={() => {
+                                      if (window.confirm(`Remover o arquivo "${file.originalName}"?`)) {
+                                        deleteFileMutation.mutate(file.id);
+                                      }
+                                    }}
+                                    disabled={deleteFileMutation.isPending}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* NOTAS DA PROPOSTA */}
                 <Card className="bg-white dark:bg-gray-900">
                   <CardHeader className="border-b border-gray-200 dark:border-gray-700">
                     <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
@@ -1718,6 +1961,46 @@ export default function LeadPJDetail() {
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
+
+      <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) closePreview(); }}>
+        <DialogContent className="bg-white dark:bg-gray-900 max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-3 border-b border-gray-200 dark:border-gray-700">
+            <DialogTitle className="text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              <span className="truncate">{previewFile?.originalName}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 p-2">
+            {previewFile?.mimeType?.startsWith('image/') ? (
+              <img
+                src={previewFile.blobUrl}
+                alt={previewFile.originalName}
+                className="mx-auto max-h-full"
+              />
+            ) : previewFile?.mimeType === 'application/pdf' ? (
+              <iframe
+                src={previewFile.blobUrl}
+                title={previewFile.originalName}
+                className="w-full h-full border-0"
+                sandbox=""
+              />
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2 px-6 py-3 border-t border-gray-200 dark:border-gray-700">
+            <Button
+              variant="outline"
+              onClick={() => previewFile && openFile(previewFile, true)}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Baixar
+            </Button>
+            <Button onClick={closePreview}>
+              <X className="w-4 h-4 mr-2" />
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

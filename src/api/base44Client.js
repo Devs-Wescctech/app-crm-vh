@@ -150,6 +150,7 @@ export const base44 = {
     QuickService: createEntityClient('quick-services'),
     LeadPJ: createEntityClient('leads-pj'),
     LeadNotePJ: createEntityClient('lead-notes-pj'),
+    LeadPJFile: createEntityClient('lead-pj-files'),
     ActivityPJ: createEntityClient('activities-pj'),
     LeadPJAutomation: createEntityClient('lead-pj-automations'),
     ReferralAutomation: createEntityClient('referral-automations'),
