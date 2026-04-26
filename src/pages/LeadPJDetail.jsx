@@ -253,9 +253,8 @@ export default function LeadPJDetail() {
     if (!file) return;
 
     const allowedExt = ['jpg', 'jpeg', 'png', 'pdf'];
-    const allowedMime = ['image/jpeg', 'image/png', 'application/pdf'];
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    if (!allowedExt.includes(ext) || !allowedMime.includes(file.type)) {
+    if (!allowedExt.includes(ext)) {
       toast.error('Tipo de arquivo não permitido. Apenas .jpg, .png e .pdf.');
       e.target.value = '';
       return;
@@ -1264,18 +1263,10 @@ export default function LeadPJDetail() {
                     </p>
                   </CardHeader>
                   <CardContent className="pt-6 space-y-4">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-                      className="hidden"
-                      onChange={handleProposalFileSelected}
-                    />
                     <div className="flex flex-wrap items-center gap-3">
-                      <Button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploadingFile}
-                        className="bg-indigo-600 hover:bg-indigo-700"
+                      <label
+                        htmlFor="proposal-file-input"
+                        className={`inline-flex items-center justify-center rounded-md text-sm font-medium h-10 px-4 py-2 text-white ${uploadingFile ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
                       >
                         {uploadingFile ? (
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -1283,7 +1274,16 @@ export default function LeadPJDetail() {
                           <Upload className="w-4 h-4 mr-2" />
                         )}
                         Enviar arquivo
-                      </Button>
+                      </label>
+                      <input
+                        ref={fileInputRef}
+                        id="proposal-file-input"
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                        className="sr-only"
+                        disabled={uploadingFile}
+                        onChange={handleProposalFileSelected}
+                      />
                       <span className="text-xs text-gray-500 dark:text-gray-400">
                         {proposalFiles.length} {proposalFiles.length === 1 ? 'arquivo' : 'arquivos'}
                       </span>
