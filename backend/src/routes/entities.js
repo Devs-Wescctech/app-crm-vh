@@ -1042,6 +1042,139 @@ router.delete('/leads-pj/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// =====================
+// LEAD NOTES PJ (Timeline de notas dentro do lead)
+// =====================
+async function assertLeadVisibleForUser(leadId, userId) {
+  const visibleIds = await resolveVisibleAgentIds(userId);
+  const result = await query('SELECT agent_id FROM leads_pj WHERE id = $1', [leadId]);
+  if (result.rows.length === 0) return { ok: false, status: 404, message: 'Lead not found' };
+  if (visibleIds === null) return { ok: true };
+  const owner = result.rows[0].agent_id ? String(result.rows[0].agent_id) : null;
+  if (!owner || !visibleIds.includes(owner)) return { ok: false, status: 404, message: 'Lead not found' };
+  return { ok: true };
+}
+
+router.get('/lead-notes-pj', authMiddleware, async (req, res) => {
+  try {
+    const leadId = req.query.lead_id || req.query.leadId;
+    if (!leadId) return res.status(400).json({ message: 'lead_id is required' });
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+    const result = await query(
+      'SELECT * FROM lead_notes_pj WHERE lead_id = $1 ORDER BY created_at DESC',
+      [leadId]
+    );
+    res.json(result.rows.map(convertKeysToCamel));
+  } catch (error) {
+    console.error('Error listing lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/lead-notes-pj/filter', authMiddleware, async (req, res) => {
+  try {
+    const filters = req.body || {};
+    const leadId = filters.lead_id || filters.leadId;
+    if (!leadId) return res.status(400).json({ message: 'lead_id is required' });
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+    const result = await query(
+      'SELECT * FROM lead_notes_pj WHERE lead_id = $1 ORDER BY created_at DESC',
+      [leadId]
+    );
+    res.json(result.rows.map(convertKeysToCamel));
+  } catch (error) {
+    console.error('Error filtering lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/lead-notes-pj', authMiddleware, async (req, res) => {
+  try {
+    const data = convertKeysToSnake(req.body);
+    const leadId = data.lead_id;
+    const content = (data.content || '').trim();
+    if (!leadId) return res.status(400).json({ message: 'lead_id is required' });
+    if (!content) return res.status(400).json({ message: 'content is required' });
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    const userId = req.user?.id || null;
+    let userName = null;
+    if (userId) {
+      const a = await query('SELECT name FROM agents WHERE id = $1', [userId]);
+      userName = a.rows[0]?.name || null;
+    }
+
+    const result = await query(
+      `INSERT INTO lead_notes_pj (lead_id, content, created_by, created_by_name)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [leadId, content, userId, userName]
+    );
+    res.status(201).json(convertKeysToCamel(result.rows[0]));
+  } catch (error) {
+    console.error('Error creating lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.put('/lead-notes-pj/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = convertKeysToSnake(req.body);
+    const content = (data.content || '').trim();
+    if (!content) return res.status(400).json({ message: 'content is required' });
+
+    const existing = await query('SELECT lead_id, created_by FROM lead_notes_pj WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ message: 'Note not found' });
+    const { lead_id, created_by } = existing.rows[0];
+
+    const visibility = await assertLeadVisibleForUser(lead_id, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    // Apenas o autor da nota ou admin/coordenador pode editar.
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+    const isFullVisibility = visibleIds === null;
+    if (!isFullVisibility && String(created_by) !== String(req.user?.id)) {
+      return res.status(403).json({ message: 'Only the author can edit this note' });
+    }
+
+    const result = await query(
+      `UPDATE lead_notes_pj SET content = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [content, id]
+    );
+    res.json(convertKeysToCamel(result.rows[0]));
+  } catch (error) {
+    console.error('Error updating lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/lead-notes-pj/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await query('SELECT lead_id, created_by FROM lead_notes_pj WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ message: 'Note not found' });
+    const { lead_id, created_by } = existing.rows[0];
+
+    const visibility = await assertLeadVisibleForUser(lead_id, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+    const isFullVisibility = visibleIds === null;
+    if (!isFullVisibility && String(created_by) !== String(req.user?.id)) {
+      return res.status(403).json({ message: 'Only the author can delete this note' });
+    }
+
+    await query('DELETE FROM lead_notes_pj WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/leads-pj/filter', authMiddleware, async (req, res) => {
   try {
     // Allowlist via filterValidColumns: descarta qualquer chave que não exista

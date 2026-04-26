@@ -45,6 +45,9 @@ import {
   Presentation,
   AlertCircle,
   Trash2,
+  Pencil,
+  StickyNote,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -111,6 +114,9 @@ export default function LeadPJDetail() {
   const [sendingContractAutentique, setSendingContractAutentique] = useState(false);
   const [sendingContractLink, setSendingContractLink] = useState(false);
   const [checkingAutentique, setCheckingAutentique] = useState(false);
+  const [newProposalNote, setNewProposalNote] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteContent, setEditingNoteContent] = useState("");
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -155,6 +161,43 @@ export default function LeadPJDetail() {
   const { data: templates = [] } = useQuery({
     queryKey: ['proposalTemplates'],
     queryFn: () => base44.entities.ProposalTemplate.list(),
+  });
+
+  const { data: proposalNotes = [] } = useQuery({
+    queryKey: ['leadNotesPJ', leadId],
+    queryFn: () => base44.entities.LeadNotePJ.filter({ lead_id: leadId }),
+    enabled: !!leadId,
+    staleTime: 0,
+  });
+
+  const createProposalNoteMutation = useMutation({
+    mutationFn: (content) => base44.entities.LeadNotePJ.create({ lead_id: leadId, content }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadNotesPJ', leadId] });
+      setNewProposalNote("");
+      toast.success('Nota adicionada!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao adicionar nota'),
+  });
+
+  const updateProposalNoteMutation = useMutation({
+    mutationFn: ({ id, content }) => base44.entities.LeadNotePJ.update(id, { content }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadNotesPJ', leadId] });
+      setEditingNoteId(null);
+      setEditingNoteContent("");
+      toast.success('Nota atualizada!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao atualizar nota'),
+  });
+
+  const deleteProposalNoteMutation = useMutation({
+    mutationFn: (id) => base44.entities.LeadNotePJ.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadNotesPJ', leadId] });
+      toast.success('Nota removida!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover nota'),
   });
 
   const updateLeadMutation = useMutation({
@@ -1086,111 +1129,163 @@ export default function LeadPJDetail() {
                 <Card className="bg-white dark:bg-gray-900">
                   <CardHeader className="border-b border-gray-200 dark:border-gray-700">
                     <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
-                      <FileText className="w-5 h-5" />
-                      Proposta Comercial B2B
+                      <StickyNote className="w-5 h-5" />
+                      Notas da Proposta
                     </CardTitle>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Registre informações sobre a negociação. As notas ficam organizadas em ordem cronológica.
+                    </p>
                   </CardHeader>
-                  <CardContent className="pt-6 space-y-4">
-                    {!lead.proposal_url && !proposalUrl ? (
-                      <>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">Selecione um template para gerar a proposta:</p>
-                        <div className="grid gap-3">
-                          {templates.map(template => (
-                            <Button
-                              key={template.id}
-                              variant="outline"
-                              onClick={() => handleGenerateProposal(template.id)}
-                              disabled={generatingProposal}
-                              className="justify-start"
-                            >
-                              {generatingProposal ? (
-                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              ) : (
-                                <FileText className="w-4 h-4 mr-2" />
-                              )}
-                              {template.name}
-                            </Button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
-                          <p className="text-sm font-medium text-green-900 dark:text-green-300 flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4" />
-                            Proposta gerada com sucesso!
-                          </p>
-                          <Button
-                            variant="link"
-                            size="sm"
-                            onClick={() => window.open(proposalUrl || lead.proposal_url, '_blank')}
-                            className="p-0 h-auto text-green-700 dark:text-green-400"
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            Visualizar proposta
-                          </Button>
-                        </div>
-
-                        <div className="flex gap-3">
-                          <Button
-                            onClick={handleSendWhatsApp}
-                            disabled={sendingWhatsApp}
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                          >
-                            {sendingWhatsApp ? (
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <Send className="w-4 h-4 mr-2" />
-                            )}
-                            Enviar WhatsApp
-                          </Button>
-                          <Button
-                            onClick={handleSendEmail}
-                            disabled={sendingEmail || !lead.email}
-                            variant="outline"
-                            className="flex-1"
-                          >
-                            {sendingEmail ? (
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <Mail className="w-4 h-4 mr-2" />
-                            )}
-                            Enviar E-mail
-                          </Button>
-                        </div>
-
-                        {lead.proposal_status && (
-                          <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-sm">
-                              {lead.proposal_status === 'accepted' && (
-                                <>
-                                  <ThumbsUp className="w-4 h-4 text-green-600 dark:text-green-400" />
-                                  <span className="text-green-600 dark:text-green-400 font-medium">Proposta aceita!</span>
-                                </>
-                              )}
-                              {lead.proposal_status === 'rejected' && (
-                                <>
-                                  <ThumbsDown className="w-4 h-4 text-red-600 dark:text-red-400" />
-                                  <span className="text-red-600 dark:text-red-400 font-medium">Proposta recusada</span>
-                                </>
-                              )}
-                              {lead.proposal_status === 'viewed' && (
-                                <>
-                                  <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                                  <span className="text-blue-600 dark:text-blue-400">Proposta visualizada</span>
-                                </>
-                              )}
-                              {lead.proposal_status === 'pending' && (
-                                <>
-                                  <Clock className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                                  <span className="text-gray-600 dark:text-gray-400">Aguardando visualização</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                  <CardContent className="pt-6 space-y-6">
+                    {/* Formulário de nova nota */}
+                    <div className="space-y-2">
+                      <Textarea
+                        placeholder="Escreva uma nova nota sobre a proposta..."
+                        value={newProposalNote}
+                        onChange={(e) => setNewProposalNote(e.target.value)}
+                        rows={3}
+                        className="resize-none"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          onClick={() => {
+                            const content = newProposalNote.trim();
+                            if (!content) return;
+                            createProposalNoteMutation.mutate(content);
+                          }}
+                          disabled={!newProposalNote.trim() || createProposalNoteMutation.isPending}
+                          className="bg-indigo-600 hover:bg-indigo-700"
+                        >
+                          {createProposalNoteMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Plus className="w-4 h-4 mr-2" />
+                          )}
+                          Adicionar nota
+                        </Button>
                       </div>
-                    )}
+                    </div>
+
+                    {/* Timeline de notas */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                      {proposalNotes.length === 0 ? (
+                        <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                          <StickyNote className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                          Nenhuma nota registrada ainda.
+                        </div>
+                      ) : (
+                        <div className="relative pl-6">
+                          {/* Linha vertical da timeline */}
+                          <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-gray-200 dark:bg-gray-700" />
+
+                          <div className="space-y-5">
+                            {proposalNotes.map((note) => {
+                              const isAuthor = currentAgent && String(note.createdBy) === String(currentAgent.id);
+                              const canEdit = isAuthor || isAdmin || isCoordinator;
+                              const isEditing = editingNoteId === note.id;
+                              const createdAt = note.createdAt ? new Date(note.createdAt) : null;
+                              const updatedAt = note.updatedAt ? new Date(note.updatedAt) : null;
+                              const wasEdited = createdAt && updatedAt &&
+                                Math.abs(updatedAt.getTime() - createdAt.getTime()) > 1000;
+
+                              return (
+                                <div key={note.id} className="relative">
+                                  {/* Bolinha da timeline */}
+                                  <div className="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-indigo-600 border-2 border-white dark:border-gray-900" />
+
+                                  <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                      <div className="flex flex-col text-xs text-gray-600 dark:text-gray-400">
+                                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                                          {note.createdByName || 'Usuário'}
+                                        </span>
+                                        <span>
+                                          {createdAt && format(createdAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                                          {wasEdited && <span className="ml-1 italic">(editada)</span>}
+                                        </span>
+                                      </div>
+                                      {canEdit && !isEditing && (
+                                        <div className="flex items-center gap-1">
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 w-7 p-0"
+                                            onClick={() => {
+                                              setEditingNoteId(note.id);
+                                              setEditingNoteContent(note.content || '');
+                                            }}
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                                            onClick={() => {
+                                              if (window.confirm('Remover esta nota?')) {
+                                                deleteProposalNoteMutation.mutate(note.id);
+                                              }
+                                            }}
+                                            disabled={deleteProposalNoteMutation.isPending}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {isEditing ? (
+                                      <div className="space-y-2">
+                                        <Textarea
+                                          value={editingNoteContent}
+                                          onChange={(e) => setEditingNoteContent(e.target.value)}
+                                          rows={3}
+                                          className="resize-none"
+                                        />
+                                        <div className="flex justify-end gap-2">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                              setEditingNoteId(null);
+                                              setEditingNoteContent('');
+                                            }}
+                                          >
+                                            <X className="w-3.5 h-3.5 mr-1" />
+                                            Cancelar
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            className="bg-indigo-600 hover:bg-indigo-700"
+                                            onClick={() => {
+                                              const content = editingNoteContent.trim();
+                                              if (!content) return;
+                                              updateProposalNoteMutation.mutate({ id: note.id, content });
+                                            }}
+                                            disabled={!editingNoteContent.trim() || updateProposalNoteMutation.isPending}
+                                          >
+                                            {updateProposalNoteMutation.isPending ? (
+                                              <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                            ) : (
+                                              <Save className="w-3.5 h-3.5 mr-1" />
+                                            )}
+                                            Salvar
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words">
+                                        {note.content}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>

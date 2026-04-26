@@ -465,6 +465,19 @@ CREATE TABLE IF NOT EXISTS activities_pj (
     google_event_id VARCHAR(255)
 );
 
+CREATE TABLE IF NOT EXISTS lead_notes_pj (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    lead_id UUID NOT NULL REFERENCES leads_pj(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_by UUID REFERENCES agents(id) ON DELETE SET NULL,
+    created_by_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_notes_pj_lead_id ON lead_notes_pj(lead_id);
+CREATE INDEX IF NOT EXISTS idx_lead_notes_pj_created_at ON lead_notes_pj(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS lead_pj_automations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,

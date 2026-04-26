@@ -149,6 +149,7 @@ export const base44 = {
     DistributionRule: createEntityClient('distribution-rules'),
     QuickService: createEntityClient('quick-services'),
     LeadPJ: createEntityClient('leads-pj'),
+    LeadNotePJ: createEntityClient('lead-notes-pj'),
     ActivityPJ: createEntityClient('activities-pj'),
     LeadPJAutomation: createEntityClient('lead-pj-automations'),
     ReferralAutomation: createEntityClient('referral-automations'),
