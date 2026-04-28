@@ -179,6 +179,26 @@ export default function LeadPJDetail() {
     refetchOnMount: 'always',
   });
 
+  const temperatureComputed = useMemo(() => {
+    if (!lead) return null;
+    const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
+    return computeLeadTemperature({
+      id: lead?.id,
+      last_contact_at: lastContactAt,
+      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
+      value: lead?.value,
+      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
+    }, activities, temperatureRules);
+  }, [lead, editedLead.lastContactAt, activities, temperatureRules]);
+  const temperatureReasons = useMemo(
+    () => describeTemperatureReasons(temperatureComputed, temperatureRules),
+    [temperatureComputed, temperatureRules]
+  );
+  const temperatureThresholds = useMemo(
+    () => describeTemperatureThresholds(temperatureRules, temperatureComputed?.triggers),
+    [temperatureComputed, temperatureRules]
+  );
+
   const { data: templates = [] } = useQuery({
     queryKey: ['proposalTemplates'],
     queryFn: () => base44.entities.ProposalTemplate.list(),
@@ -1002,25 +1022,6 @@ export default function LeadPJDetail() {
   };
 
   const temperature = getLeadTemperature();
-  const temperatureComputed = useMemo(() => {
-    if (!lead) return null;
-    const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
-    return computeLeadTemperature({
-      id: lead?.id,
-      last_contact_at: lastContactAt,
-      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
-      value: lead?.value,
-      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
-    }, activities, temperatureRules);
-  }, [lead, editedLead.lastContactAt, activities, temperatureRules]);
-  const temperatureReasons = useMemo(
-    () => describeTemperatureReasons(temperatureComputed, temperatureRules),
-    [temperatureComputed, temperatureRules]
-  );
-  const temperatureThresholds = useMemo(
-    () => describeTemperatureThresholds(temperatureRules, temperatureComputed?.triggers),
-    [temperatureComputed, temperatureRules]
-  );
   const leadAgent = agents.find(a => String(a.id) === String(leadAgentId));
 
   return (
