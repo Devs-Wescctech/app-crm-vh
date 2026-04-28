@@ -31,6 +31,11 @@ import {
   Cell,
   Tooltip as ReTooltip,
   Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
 } from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -452,6 +457,17 @@ export default function SalesPJAgentPeriodsReport() {
 
   const teamSummary = useMemo(() => computeTeamSummary(rows), [rows]);
 
+  const teamChartData = useMemo(() => {
+    return teamSummary.summary
+      .filter((s) => s.totalDays > 0)
+      .map((s) => ({
+        name: s.teamName,
+        days: Number(s.totalDays.toFixed(2)),
+        leadCount: s.leadCount,
+        totalValue: s.totalValue || 0,
+      }));
+  }, [teamSummary]);
+
   const chartData = useMemo(() => {
     const sorted = [...agentSummary.summary]
       .filter((s) => s.totalDays > 0)
@@ -852,6 +868,65 @@ export default function SalesPJAgentPeriodsReport() {
           </p>
         </CardHeader>
         <CardContent className="p-0">
+          {!isLoading && !isFetching && teamChartData.length > 0 && (
+            <div className="px-4 pt-4 pb-2 border-b border-gray-200 dark:border-gray-800">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Comparativo de dias de responsabilidade por filial
+              </p>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(160, teamChartData.length * 40 + 40)}
+              >
+                <BarChart
+                  data={teamChartData}
+                  layout="vertical"
+                  margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    horizontal={false}
+                    stroke="#e5e7eb"
+                  />
+                  <XAxis
+                    type="number"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => formatDays(v)}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    tick={{ fontSize: 12 }}
+                    width={140}
+                  />
+                  <ReTooltip
+                    cursor={{ fill: "rgba(99, 102, 241, 0.08)" }}
+                    formatter={(value, _name, item) => {
+                      const leadCount = item?.payload?.leadCount ?? 0;
+                      const totalValue = item?.payload?.totalValue ?? 0;
+                      return [
+                        `${formatDays(value)} dias · ${leadCount} leads · ${formatBRL(
+                          totalValue
+                        )}`,
+                        "Responsabilidade",
+                      ];
+                    }}
+                  />
+                  <Bar
+                    dataKey="days"
+                    fill="#6366f1"
+                    radius={[0, 4, 4, 0]}
+                  >
+                    {teamChartData.map((_entry, index) => (
+                      <Cell
+                        key={`team-cell-${index}`}
+                        fill={CHART_COLORS[index % CHART_COLORS.length]}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 dark:bg-gray-800">
