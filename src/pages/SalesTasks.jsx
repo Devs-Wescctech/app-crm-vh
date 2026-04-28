@@ -65,8 +65,10 @@ import {
   MessageSquare,
   Mail,
   MoreVertical,
-  X
+  X,
+  ArrowRight,
 } from "lucide-react";
+import { getAgentDisplayName } from "@/utils/agents";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -670,6 +672,22 @@ export default function SalesTasks() {
                                 )}
                               </div>
                             )}
+
+                            {(() => {
+                              const original = task.originalAssignedTo || task.original_assigned_to;
+                              const current = task.assignedTo || task.assigned_to;
+                              if (!original || String(original) === String(current)) return null;
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                                  title="Esta tarefa foi reatribuída"
+                                >
+                                  <ArrowRight className="w-3 h-3 mr-1" />
+                                  Recebida de {getAgentDisplayName(original, allAgents)}
+                                </Badge>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>

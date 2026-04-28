@@ -52,7 +52,9 @@ import {
   Link2,
   X,
   Flag,
+  ArrowRight,
 } from "lucide-react";
+import { getAgentDisplayName } from "@/utils/agents";
 import {
   format,
   startOfWeek,
@@ -530,6 +532,7 @@ export default function SalesAgenda() {
                   googleEventsForDay={googleEventsForDay}
                   showGoogleEvents={showGoogleEvents}
                   onActivityClick={setSelectedActivity}
+                  agents={agents}
                   singleDay
                 />
               )}
@@ -540,6 +543,7 @@ export default function SalesAgenda() {
                   googleEventsForDay={googleEventsForDay}
                   showGoogleEvents={showGoogleEvents}
                   onActivityClick={setSelectedActivity}
+                  agents={agents}
                 />
               )}
               {viewMode === "month" && (
@@ -551,6 +555,7 @@ export default function SalesAgenda() {
                   getActivitiesForDay={getActivitiesForDay}
                   googleEventsForDay={googleEventsForDay}
                   showGoogleEvents={showGoogleEvents}
+                  agents={agents}
                 />
               )}
             </>
@@ -565,6 +570,7 @@ export default function SalesAgenda() {
             activity={selectedActivity}
             getLeadById={getLeadById}
             handleToggle={handleToggle}
+            agents={agents}
             onClose={() => setSelectedActivity(null)}
           />
         )}
@@ -669,7 +675,13 @@ export default function SalesAgenda() {
   );
 }
 
-function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEvents, onActivityClick, singleDay = false }) {
+function isReassignedActivity(act) {
+  const original = getVal(act, "originalAssignedTo", "original_assigned_to");
+  const current = getVal(act, "assignedTo", "assigned_to");
+  return Boolean(original) && String(original) !== String(current);
+}
+
+function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEvents, onActivityClick, agents = [], singleDay = false }) {
   const colCount = days.length;
 
   return (
@@ -757,11 +769,16 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
                 const minutesSince6am = (h - 6) * 60 + m;
                 if (minutesSince6am < 0) return null;
                 const cfg = ACTIVITY_TYPES[act.type] || ACTIVITY_TYPES.task;
+                const reassigned = isReassignedActivity(act);
+                const originalAgentName = reassigned
+                  ? getAgentDisplayName(getVal(act, "originalAssignedTo", "original_assigned_to"), agents)
+                  : null;
 
                 return (
                   <button
                     key={act.id}
                     onClick={() => onActivityClick(act)}
+                    title={reassigned ? `Recebida de ${originalAgentName}` : undefined}
                     className="absolute z-[15] rounded px-1.5 py-0.5 text-left overflow-hidden cursor-pointer hover:opacity-90 transition-opacity group"
                     style={{
                       top: `${minutesSince6am}px`,
@@ -775,13 +792,19 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
                       borderBottom: `1px solid ${act.completed ? '#d1d5db' : cfg.border}`,
                     }}
                   >
-                    <p className={`text-[11px] font-medium truncate ${act.completed ? "line-through text-gray-400" : ""}`}
+                    <p className={`text-[11px] font-medium truncate flex items-center gap-1 ${act.completed ? "line-through text-gray-400" : ""}`}
                       style={act.completed ? {} : { color: cfg.color }}
                     >
-                      {act.title || act.description || cfg.label}
+                      {reassigned && (
+                        <ArrowRight className="w-3 h-3 flex-shrink-0 text-amber-600" />
+                      )}
+                      <span className="truncate">{act.title || act.description || cfg.label}</span>
                     </p>
                     <p className="text-[10px] text-gray-500 truncate">
                       {format(scheduled, "HH:mm")} · {cfg.label}
+                      {reassigned && originalAgentName && (
+                        <span className="text-amber-700"> · de {originalAgentName}</span>
+                      )}
                     </p>
                   </button>
                 );
@@ -830,7 +853,7 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
   );
 }
 
-function MonthGrid({ calDays, currentMonth, selectedDate, setSelectedDate, getActivitiesForDay, googleEventsForDay, showGoogleEvents }) {
+function MonthGrid({ calDays, currentMonth, selectedDate, setSelectedDate, getActivitiesForDay, googleEventsForDay, showGoogleEvents, agents = [] }) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
@@ -864,17 +887,23 @@ function MonthGrid({ calDays, currentMonth, selectedDate, setSelectedDate, getAc
               <div className="space-y-0.5">
                 {acts.slice(0, 3).map((act) => {
                   const cfg = ACTIVITY_TYPES[act.type] || ACTIVITY_TYPES.task;
+                  const reassigned = isReassignedActivity(act);
+                  const originalAgentName = reassigned
+                    ? getAgentDisplayName(getVal(act, "originalAssignedTo", "original_assigned_to"), agents)
+                    : null;
                   return (
                     <div
                       key={act.id}
-                      className="text-[10px] font-medium truncate rounded px-1 py-0.5"
+                      title={reassigned ? `Recebida de ${originalAgentName}` : undefined}
+                      className="text-[10px] font-medium truncate rounded px-1 py-0.5 flex items-center gap-1"
                       style={{
                         backgroundColor: act.completed ? '#f3f4f6' : cfg.bg,
                         color: act.completed ? '#9ca3af' : cfg.color,
                         borderLeft: `2px solid ${act.completed ? '#d1d5db' : cfg.color}`,
                       }}
                     >
-                      {act.title || act.description || cfg.label}
+                      {reassigned && <ArrowRight className="w-2.5 h-2.5 flex-shrink-0 text-amber-600" />}
+                      <span className="truncate">{act.title || act.description || cfg.label}</span>
                     </div>
                   );
                 })}
@@ -951,12 +980,16 @@ function SidebarMiniCalendar({ currentMonth, setCurrentMonth, selectedDate, setS
   );
 }
 
-function ActivityPopover({ activity, getLeadById, handleToggle, onClose }) {
+function ActivityPopover({ activity, getLeadById, handleToggle, agents = [], onClose }) {
   const cfg = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.task;
   const Icon = cfg.icon;
   const leadId = getVal(activity, "leadId", "lead_id");
   const lead = getLeadById(leadId);
   const scheduledAt = activity.scheduledAt ? parseISO(activity.scheduledAt) : null;
+  const reassigned = isReassignedActivity(activity);
+  const originalAgentName = reassigned
+    ? getAgentDisplayName(getVal(activity, "originalAssignedTo", "original_assigned_to"), agents)
+    : null;
 
   return (
     <motion.div
@@ -1013,6 +1046,15 @@ function ActivityPopover({ activity, getLeadById, handleToggle, onClose }) {
                 <span>{lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || 'Lead sem nome'}</span>
                 <ExternalLink className="w-3 h-3" />
               </Link>
+            )}
+            {reassigned && (
+              <div
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"
+                title="Esta atividade foi reatribuída"
+              >
+                <ArrowRight className="w-4 h-4 flex-shrink-0" />
+                <span className="text-xs font-medium">Recebida de {originalAgentName}</span>
+              </div>
             )}
           </div>
 

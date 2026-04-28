@@ -15,6 +15,7 @@ import {
   CheckCircle,
   Clock,
   ArrowUpRight,
+  ArrowRight,
   Briefcase,
   Calendar,
   XCircle,
@@ -24,6 +25,7 @@ import {
 import { format, isToday, isThisWeek, isThisMonth, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { LEAD_PJ_STAGES } from "@/constants/stages";
+import { getAgentDisplayName } from "@/utils/agents";
 
 const fmtCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
@@ -64,6 +66,12 @@ export default function MyDashboardPJ() {
     enabled: !!currentAgent,
   });
 
+  const { data: agents = [] } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => base44.entities.Agent.list(),
+    staleTime: 1000 * 60 * 2,
+  });
+
   const getLeadValue = (lead) =>
     parseFloat(lead.value) || parseFloat(lead.monthlyValue) || parseFloat(lead.monthly_value) || 0;
 
@@ -88,6 +96,16 @@ export default function MyDashboardPJ() {
     if (!d) return false;
     try { return parseISO(d) < new Date() && !isToday(parseISO(d)); } catch { return false; }
   });
+  const reassignedTasks = pendingTasks.filter(a => {
+    const original = a.originalAssignedTo || a.original_assigned_to;
+    const current = a.assignedTo || a.assigned_to;
+    return original && String(original) !== String(current);
+  });
+  const reassignedFromNames = Array.from(new Set(
+    reassignedTasks
+      .map(a => getAgentDisplayName(a.originalAssignedTo || a.original_assigned_to, agents))
+      .filter(Boolean)
+  ));
 
   const pipelineData = STAGES_PJ
     .filter(s => s.id !== 'fechado_perdido')
@@ -275,6 +293,27 @@ export default function MyDashboardPJ() {
               </div>
               <Badge className="bg-blue-600 text-white">{pendingTasks.length}</Badge>
             </div>
+            {reassignedTasks.length > 0 && (
+              <div
+                className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800"
+                title={reassignedFromNames.length > 0 ? `Recebida(s) de: ${reassignedFromNames.join(', ')}` : undefined}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <ArrowRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                      Recebidas de outro vendedor
+                    </span>
+                    {reassignedFromNames.length > 0 && (
+                      <span className="text-xs text-amber-700/70 dark:text-amber-300/70 truncate">
+                        de {reassignedFromNames.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Badge className="bg-amber-600 text-white flex-shrink-0">{reassignedTasks.length}</Badge>
+              </div>
+            )}
             <Link to={createPageUrl("SalesTasks")}>
               <Button variant="outline" size="sm" className="w-full mt-2 gap-2">
                 <ArrowUpRight className="w-4 h-4" />
