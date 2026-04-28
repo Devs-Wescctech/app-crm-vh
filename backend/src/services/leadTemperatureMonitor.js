@@ -219,6 +219,14 @@ async function deliverAlert({
  *    again the next time it cools down.
  *  - Hot: do not notify the same supervisor twice within 24h for the same lead.
  */
+// Hard cap on how many notified-lead ids we persist per run, per kind. The
+// runs table is bounded by MONITOR_RUN_HISTORY_LIMIT, but a single run with
+// thousands of cold leads could otherwise insert thousands of child rows.
+// The Settings UI is a troubleshooting aid, not an audit log, so capping at
+// 100 keeps the table tiny while still being more than enough to inspect a
+// surprising spike. The UI surfaces "X of N shown" when this caps in.
+export const MONITOR_RUN_LEAD_CAP = 100;
+
 export async function checkLeadTemperatures({ now = new Date() } = {}) {
   const rules = await loadTemperatureRules();
 
@@ -227,7 +235,7 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
   const coldEnabled = coldThreshold !== null && coldThreshold !== undefined && coldThreshold > 0;
 
   if (!coldEnabled && !rules.hot) {
-    return { checked: 0, coldNotified: 0, hotNotified: 0 };
+    return { checked: 0, coldNotified: 0, hotNotified: 0, coldLeads: [], hotLeads: [] };
   }
 
   const leadsResult = await query(
@@ -286,6 +294,11 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
 
   let coldNotified = 0;
   let hotNotified = 0;
+  // Capture which leads each kind of alert went to. The arrays are capped
+  // when persisted (see MONITOR_RUN_LEAD_CAP) but we collect the full set
+  // here so callers can inspect every triggered lead in-memory if needed.
+  const coldLeads = [];
+  const hotLeads = [];
 
   for (const lead of leads) {
     const agent = agentMap.get(lead.agent_id);
@@ -324,7 +337,14 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
           entityId: lead.id,
           priority: 'high',
         });
-        if (result.delivered) coldNotified++;
+        if (result.delivered) {
+          coldNotified++;
+          coldLeads.push({
+            leadId: lead.id,
+            label: leadLabel,
+            recipientEmail: agent.email,
+          });
+        }
       }
     }
 
@@ -347,12 +367,19 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
           entityId: lead.id,
           priority: 'normal',
         });
-        if (result.delivered) hotNotified++;
+        if (result.delivered) {
+          hotNotified++;
+          hotLeads.push({
+            leadId: lead.id,
+            label: leadLabel,
+            recipientEmail: agent.supervisor_email,
+          });
+        }
       }
     }
   }
 
-  return { checked: leads.length, coldNotified, hotNotified };
+  return { checked: leads.length, coldNotified, hotNotified, coldLeads, hotLeads };
 }
 
 /**
@@ -372,7 +399,7 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
 export async function runMonitorAndRecord({ now = new Date() } = {}) {
   const startedAt = now instanceof Date ? now : new Date();
   const startMs = Date.now();
-  let result = { checked: 0, coldNotified: 0, hotNotified: 0 };
+  let result = { checked: 0, coldNotified: 0, hotNotified: 0, coldLeads: [], hotLeads: [] };
   let status = 'success';
   let errorMessage = null;
   let thrown = null;
@@ -389,12 +416,13 @@ export async function runMonitorAndRecord({ now = new Date() } = {}) {
   const durationMs = Date.now() - startMs;
 
   try {
-    await query(
+    const insertResult = await query(
       `INSERT INTO lead_temperature_monitor_runs
          (started_at, finished_at, duration_ms,
           leads_checked, cold_notified, hot_notified,
           status, error_message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
       [
         startedAt.toISOString(),
         finishedAt.toISOString(),
@@ -406,6 +434,38 @@ export async function runMonitorAndRecord({ now = new Date() } = {}) {
         errorMessage,
       ]
     );
+    const runId = insertResult.rows[0]?.id;
+
+    // Persist the affected lead ids (capped per kind) so admins can expand a
+    // run in Settings and click through to each lead. Skipped on error runs:
+    // checkLeadTemperatures threw before it could populate the arrays.
+    // Child rows are removed automatically when the parent run is deleted by
+    // the scheduled `pruneOldMonitorRuns` job, thanks to ON DELETE CASCADE.
+    if (runId && status === 'success') {
+      const coldSlice = (result.coldLeads || []).slice(0, MONITOR_RUN_LEAD_CAP);
+      const hotSlice = (result.hotLeads || []).slice(0, MONITOR_RUN_LEAD_CAP);
+      const rows = [
+        ...coldSlice.map(l => ({ ...l, kind: 'cold' })),
+        ...hotSlice.map(l => ({ ...l, kind: 'hot' })),
+      ];
+      if (rows.length > 0) {
+        const values = [];
+        const placeholders = rows.map((row, i) => {
+          const base = i * 5;
+          values.push(runId, row.leadId, row.kind, row.label || null, row.recipientEmail || null);
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+        });
+        // ON CONFLICT guards the (run_id, kind, lead_id) UNIQUE constraint in
+        // case the same lead somehow gets pushed twice in one run.
+        await query(
+          `INSERT INTO lead_temperature_monitor_run_leads
+             (run_id, lead_id, kind, lead_label, recipient_email)
+           VALUES ${placeholders.join(', ')}
+           ON CONFLICT (run_id, kind, lead_id) DO NOTHING`,
+          values
+        );
+      }
+    }
   } catch (recordErr) {
     console.error('[Lead Temperature] Falha ao registrar histórico do monitor:', recordErr.message);
   }
@@ -429,7 +489,8 @@ export async function listRecentMonitorRuns({ limit = 10 } = {}) {
      LIMIT $1`,
     [safeLimit]
   );
-  return result.rows.map((row) => ({
+
+  const runs = result.rows.map((row) => ({
     id: row.id,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -439,7 +500,57 @@ export async function listRecentMonitorRuns({ limit = 10 } = {}) {
     hotNotified: row.hot_notified,
     status: row.status,
     errorMessage: row.error_message,
+    coldLeads: [],
+    hotLeads: [],
+    coldLeadsCap: MONITOR_RUN_LEAD_CAP,
+    hotLeadsCap: MONITOR_RUN_LEAD_CAP,
   }));
+
+  if (runs.length === 0) return runs;
+
+  // Pull every persisted lead row for the returned runs in one shot, then
+  // group in JS. The LEFT JOIN against leads_pj surfaces the current name
+  // (so renames are reflected in the panel) while falling back to the
+  // snapshot stored at notification time when the lead has been deleted.
+  const runIds = runs.map(r => r.id);
+  const placeholders = runIds.map((_, i) => `$${i + 1}`).join(',');
+  const leadsResult = await query(
+    `SELECT rl.run_id, rl.lead_id, rl.kind, rl.lead_label, rl.recipient_email,
+            lp.razao_social, lp.nome_fantasia, lp.contact_name
+     FROM lead_temperature_monitor_run_leads rl
+     LEFT JOIN leads_pj lp ON lp.id = rl.lead_id
+     WHERE rl.run_id IN (${placeholders})
+     ORDER BY rl.created_at ASC`,
+    runIds
+  );
+
+  const byRun = new Map();
+  for (const row of leadsResult.rows) {
+    const label = row.razao_social || row.nome_fantasia || row.contact_name || row.lead_label || 'Lead PJ';
+    const entry = {
+      leadId: row.lead_id,
+      label,
+      recipientEmail: row.recipient_email,
+      deleted: !row.razao_social && !row.nome_fantasia && !row.contact_name,
+    };
+    let bucket = byRun.get(row.run_id);
+    if (!bucket) {
+      bucket = { cold: [], hot: [] };
+      byRun.set(row.run_id, bucket);
+    }
+    if (row.kind === 'cold') bucket.cold.push(entry);
+    else if (row.kind === 'hot') bucket.hot.push(entry);
+  }
+
+  for (const run of runs) {
+    const bucket = byRun.get(run.id);
+    if (bucket) {
+      run.coldLeads = bucket.cold;
+      run.hotLeads = bucket.hot;
+    }
+  }
+
+  return runs;
 }
 
 /**

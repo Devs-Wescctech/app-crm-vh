@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer, History, RefreshCw, XCircle } from "lucide-react";
+import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer, History, RefreshCw, XCircle, ChevronRight, ChevronDown, ExternalLink, Snowflake, Flame } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -840,7 +841,100 @@ function formatDurationMs(ms) {
   return `${m}m ${s.toString().padStart(2, '0')}s`;
 }
 
+function MonitorRunLeadsList({ icon: Icon, label, leads, totalNotified, cap, accent }) {
+  // Render one column inside the expanded panel for either cold or hot
+  // alerts. Each lead is a link to LeadPJDetail. When the persisted slice
+  // was capped (totalNotified > leads.length) we surface that explicitly so
+  // admins know there are more leads beyond what's listed.
+  const truncated = totalNotified > leads.length;
+  return (
+    <div className="flex-1 min-w-0">
+      <div className={`flex items-center gap-2 mb-2 text-sm font-medium ${accent}`}>
+        <Icon className="w-4 h-4" />
+        <span>{label}</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
+          ({totalNotified})
+        </span>
+      </div>
+      {leads.length === 0 ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+          Nenhum lead registrado.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {leads.map((lead) => (
+            <li key={lead.leadId} className="text-sm">
+              <Link
+                to={`/LeadPJDetail?id=${lead.leadId}`}
+                className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:underline break-words"
+              >
+                <span>{lead.label}</span>
+                <ExternalLink className="w-3 h-3 shrink-0" />
+              </Link>
+              {lead.deleted && (
+                <span className="ml-2 text-xs text-gray-400 dark:text-gray-500 italic">
+                  (lead removido)
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {truncated && (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 italic">
+          Mostrando {leads.length} de {totalNotified} (limite de {cap || leads.length}{' '}
+          leads salvos por execução).
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MonitorRunLeadsBreakdown({ run }) {
+  const coldLeads = Array.isArray(run.coldLeads) ? run.coldLeads : [];
+  const hotLeads = Array.isArray(run.hotLeads) ? run.hotLeads : [];
+  return (
+    <div className="rounded-lg bg-gray-50 dark:bg-gray-950/30 border border-gray-200 dark:border-gray-800 p-4">
+      <div className="flex flex-col md:flex-row gap-6">
+        {(run.coldNotified || 0) > 0 && (
+          <MonitorRunLeadsList
+            icon={Snowflake}
+            label="Alertas frios"
+            leads={coldLeads}
+            totalNotified={run.coldNotified || 0}
+            cap={run.coldLeadsCap}
+            accent="text-blue-700 dark:text-blue-300"
+          />
+        )}
+        {(run.hotNotified || 0) > 0 && (
+          <MonitorRunLeadsList
+            icon={Flame}
+            label="Avisos quentes"
+            leads={hotLeads}
+            totalNotified={run.hotNotified || 0}
+            cap={run.hotLeadsCap}
+            accent="text-orange-700 dark:text-orange-300"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LeadTemperatureMonitorHistory() {
+  // Track which run rows the admin has expanded to inspect the affected
+  // leads. We default to collapsed because most rows are uneventful; the
+  // expand affordance is just for troubleshooting unexpected spikes.
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpanded = (id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const { data, isFetching, isError, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['leadTemperatureMonitorRuns'],
     queryFn: async () => {
@@ -964,6 +1058,7 @@ function LeadTemperatureMonitorHistory() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 dark:bg-gray-950/50 text-xs uppercase text-gray-500 dark:text-gray-400">
                 <tr>
+                  <th className="w-8 px-2 py-2"></th>
                   <th className="text-left font-medium px-3 py-2">Quando</th>
                   <th className="text-left font-medium px-3 py-2">Status</th>
                   <th className="text-right font-medium px-3 py-2">Leads avaliados</th>
@@ -973,58 +1068,95 @@ function LeadTemperatureMonitorHistory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                {runs.map((r) => (
-                  <tr
-                    key={r.id}
-                    className={
-                      r.status === 'error'
-                        ? 'bg-red-50/30 dark:bg-red-950/10'
-                        : 'bg-white dark:bg-gray-900'
-                    }
-                  >
-                    <td className="px-3 py-2 align-top">
-                      <div className="text-gray-800 dark:text-gray-200">
-                        {formatRelativeTime(r.startedAt)}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {formatAbsoluteTime(r.startedAt)}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      {r.status === 'error' ? (
-                        <Badge className="bg-red-600 hover:bg-red-600 text-white">
-                          <XCircle className="w-3 h-3 mr-1" />
-                          Falhou
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300">
-                          <CheckCircle2 className="w-3 h-3 mr-1" />
-                          Sucesso
-                        </Badge>
+                {runs.map((r) => {
+                  const totalLeads = (r.coldNotified || 0) + (r.hotNotified || 0);
+                  const isExpanded = expanded.has(r.id);
+                  // Only allow expansion when at least one alert was sent.
+                  // Disabling the chevron on no-op runs avoids an empty
+                  // expanded panel that says "no leads" for every quiet run.
+                  const canExpand = totalLeads > 0;
+                  const rowBg =
+                    r.status === 'error'
+                      ? 'bg-red-50/30 dark:bg-red-950/10'
+                      : 'bg-white dark:bg-gray-900';
+                  return (
+                    <React.Fragment key={r.id}>
+                      <tr
+                        className={`${rowBg} ${canExpand ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/40' : ''}`}
+                        onClick={canExpand ? () => toggleExpanded(r.id) : undefined}
+                      >
+                        <td className="px-2 py-2 align-top">
+                          {canExpand ? (
+                            <button
+                              type="button"
+                              aria-label={isExpanded ? 'Recolher leads' : 'Expandir leads'}
+                              aria-expanded={isExpanded}
+                              onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }}
+                              className="text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="inline-block w-4 h-4" aria-hidden="true" />
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="text-gray-800 dark:text-gray-200">
+                            {formatRelativeTime(r.startedAt)}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {formatAbsoluteTime(r.startedAt)}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          {r.status === 'error' ? (
+                            <Badge className="bg-red-600 hover:bg-red-600 text-white">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Falhou
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Sucesso
+                            </Badge>
+                          )}
+                          {r.status === 'error' && r.errorMessage && (
+                            <div
+                              className="text-xs text-red-600 dark:text-red-300 mt-1 max-w-xs break-words"
+                              title={r.errorMessage}
+                            >
+                              {r.errorMessage}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                          {r.leadsChecked}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                          {r.coldNotified}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                          {r.hotNotified}
+                        </td>
+                        <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                          {formatDurationMs(r.durationMs)}
+                        </td>
+                      </tr>
+                      {isExpanded && canExpand && (
+                        <tr className={rowBg}>
+                          <td></td>
+                          <td colSpan={6} className="px-3 pb-4 pt-0 align-top">
+                            <MonitorRunLeadsBreakdown run={r} />
+                          </td>
+                        </tr>
                       )}
-                      {r.status === 'error' && r.errorMessage && (
-                        <div
-                          className="text-xs text-red-600 dark:text-red-300 mt-1 max-w-xs break-words"
-                          title={r.errorMessage}
-                        >
-                          {r.errorMessage}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
-                      {r.leadsChecked}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
-                      {r.coldNotified}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
-                      {r.hotNotified}
-                    </td>
-                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
-                      {formatDurationMs(r.durationMs)}
-                    </td>
-                  </tr>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

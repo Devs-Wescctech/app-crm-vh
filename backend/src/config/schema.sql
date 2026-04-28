@@ -1475,6 +1475,25 @@ CREATE TABLE IF NOT EXISTS lead_temperature_monitor_runs (
 CREATE INDEX IF NOT EXISTS idx_lead_temperature_monitor_runs_started_at
     ON lead_temperature_monitor_runs (started_at DESC);
 
+-- Per-run list of leads that triggered cold/hot alerts. Stored in a child
+-- table (instead of a JSON column on the runs row) so the runs row stays
+-- compact even when a single run touches thousands of leads. The Settings
+-- UI joins this back to the runs row to expand "12 cold alerts" into a
+-- clickable list of leads.
+CREATE TABLE IF NOT EXISTS lead_temperature_monitor_run_leads (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    run_id UUID NOT NULL REFERENCES lead_temperature_monitor_runs(id) ON DELETE CASCADE,
+    lead_id UUID NOT NULL,
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('cold','hot')),
+    lead_label TEXT,
+    recipient_email TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (run_id, kind, lead_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_temperature_monitor_run_leads_run_id
+    ON lead_temperature_monitor_run_leads (run_id);
+
 -- =====================
 -- COORDINATOR ROLE MIGRATION
 -- =====================
