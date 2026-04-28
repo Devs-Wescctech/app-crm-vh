@@ -20,6 +20,7 @@ import {
   ShieldX,
   UserCog,
   Users,
+  Building2,
   ArrowRight,
   PieChart as PieChartIcon,
 } from "lucide-react";
@@ -161,6 +162,77 @@ function computeAgentSummary(rowsList) {
       agentName: b.agentName,
       teamName: b.teamName,
       teamId: b.teamId,
+      leadCount: b.leadIds.size,
+      totalDays: b.totalDays,
+      totalValue,
+      percent: totalDays > 0 ? (b.totalDays / totalDays) * 100 : 0,
+    };
+  });
+
+  summary.sort((a, b) => b.totalDays - a.totalDays);
+
+  const uniqueLeadValues = new Map();
+  rowsList.forEach((r) => {
+    if (!uniqueLeadValues.has(r.leadId)) {
+      uniqueLeadValues.set(r.leadId, r.leadValue || 0);
+    }
+  });
+
+  const totals = {
+    uniqueLeads: uniqueLeadValues.size,
+    totalDays: summary.reduce((acc, s) => acc + s.totalDays, 0),
+    totalValue: Array.from(uniqueLeadValues.values()).reduce(
+      (acc, v) => acc + (v || 0),
+      0
+    ),
+  };
+
+  return { summary, totals };
+}
+
+/**
+ * Aggregates a list of derived periods (rows) into per-team/branch
+ * commission summaries — used both by the on-screen card (current page)
+ * and by the CSV export (full dataset across all pages).
+ */
+function computeTeamSummary(rowsList) {
+  const buckets = new Map();
+  let totalDays = 0;
+
+  rowsList.forEach((r) => {
+    const teamKey = r.teamId
+      ? String(r.teamId)
+      : `__none__:${r.teamName || "Sem filial"}`;
+    const days = r.overlapDays;
+    totalDays += days;
+
+    let bucket = buckets.get(teamKey);
+    if (!bucket) {
+      bucket = {
+        teamId: r.teamId || null,
+        teamName: r.teamName || "Sem filial",
+        totalDays: 0,
+        leadIds: new Set(),
+        leadValues: new Map(),
+      };
+      buckets.set(teamKey, bucket);
+    }
+
+    bucket.totalDays += days;
+    bucket.leadIds.add(r.leadId);
+    if (!bucket.leadValues.has(r.leadId)) {
+      bucket.leadValues.set(r.leadId, r.leadValue || 0);
+    }
+  });
+
+  const summary = Array.from(buckets.values()).map((b) => {
+    const totalValue = Array.from(b.leadValues.values()).reduce(
+      (acc, v) => acc + (v || 0),
+      0
+    );
+    return {
+      teamId: b.teamId,
+      teamName: b.teamName,
       leadCount: b.leadIds.size,
       totalDays: b.totalDays,
       totalValue,
@@ -378,6 +450,8 @@ export default function SalesPJAgentPeriodsReport() {
 
   const agentSummary = useMemo(() => computeAgentSummary(rows), [rows]);
 
+  const teamSummary = useMemo(() => computeTeamSummary(rows), [rows]);
+
   const chartData = useMemo(() => {
     const sorted = [...agentSummary.summary]
       .filter((s) => s.totalDays > 0)
@@ -537,6 +611,7 @@ export default function SalesPJAgentPeriodsReport() {
       ]);
 
       const exportSummary = computeAgentSummary(exportRows);
+      const exportTeamSummary = computeTeamSummary(exportRows);
 
       const summaryHeader = [
         "Vendedor",
@@ -565,6 +640,30 @@ export default function SalesPJAgentPeriodsReport() {
         "100,0%",
       ];
 
+      const teamSummaryHeader = [
+        "Filial/Equipe",
+        "Nº de Leads",
+        "Dias de Responsabilidade",
+        "Valor Total dos Leads (R$)",
+        "% do Total (dias)",
+      ];
+
+      const teamSummaryRows = exportTeamSummary.summary.map((s) => [
+        s.teamName,
+        s.leadCount,
+        formatDays(s.totalDays),
+        (s.totalValue || 0).toFixed(2).replace(".", ","),
+        formatPercent(s.percent),
+      ]);
+
+      const teamSummaryTotalsRow = [
+        "TOTAL",
+        exportTeamSummary.totals.uniqueLeads,
+        formatDays(exportTeamSummary.totals.totalDays),
+        (exportTeamSummary.totals.totalValue || 0).toFixed(2).replace(".", ","),
+        "100,0%",
+      ];
+
       const csv = [
         ["RELATÓRIO DE PERÍODOS DE RESPONSABILIDADE - LEADS PJ"],
         [`Período: ${periodLabel}`],
@@ -573,6 +672,11 @@ export default function SalesPJAgentPeriodsReport() {
             locale: ptBR,
           })}`,
         ],
+        [""],
+        ["RESUMO POR FILIAL/EQUIPE"],
+        teamSummaryHeader,
+        ...teamSummaryRows,
+        teamSummaryTotalsRow,
         [""],
         ["RESUMO POR VENDEDOR"],
         summaryHeader,
@@ -735,6 +839,112 @@ export default function SalesPJAgentPeriodsReport() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+        <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+          <CardTitle className="text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <Building2 className="w-5 h-5" />
+            Resumo por filial/equipe
+          </CardTitle>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Agregado por filial/equipe — útil para comparar performance entre
+            escritórios e distribuir comissão entre equipes.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Filial / Equipe
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Leads
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Dias de responsabilidade
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Valor total dos leads
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    % do total
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {isLoading || isFetching ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-4 py-8 text-center text-gray-500 dark:text-gray-400"
+                    >
+                      Carregando…
+                    </td>
+                  </tr>
+                ) : teamSummary.summary.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-4 py-8 text-center text-gray-500 dark:text-gray-400"
+                    >
+                      Sem dados para resumir nos filtros atuais.
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {teamSummary.summary.map((s) => (
+                      <tr
+                        key={s.teamId || s.teamName}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                          {s.teamName}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                          {s.leadCount}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                          {formatDays(s.totalDays)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                          {formatBRL(s.totalValue)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Badge
+                            variant="outline"
+                            className="text-xs font-medium"
+                          >
+                            {formatPercent(s.percent)}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-50 dark:bg-gray-800 font-semibold">
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+                        TOTAL
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                        {teamSummary.totals.uniqueLeads}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                        {formatDays(teamSummary.totals.totalDays)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                        {formatBRL(teamSummary.totals.totalValue)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 dark:text-gray-100">
+                        100,0%
+                      </td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 xl:col-span-1">
