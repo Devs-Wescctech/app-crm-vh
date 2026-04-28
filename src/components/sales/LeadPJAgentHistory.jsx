@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, isValid, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   User,
@@ -11,28 +11,21 @@ import {
   UserCog,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { getAgentDisplayName } from "@/utils/agents";
-
-const parseDate = (value) => {
-  if (!value) return null;
-  try {
-    const d = typeof value === "string" ? parseISO(value) : new Date(value);
-    return isValid(d) ? d : null;
-  } catch {
-    return null;
-  }
-};
+import {
+  deriveLeadAgentPeriods,
+  parseDateLoose,
+} from "@/utils/leadPjAgentPeriods";
 
 const formatDate = (value) => {
-  const d = parseDate(value);
+  const d = parseDateLoose(value);
   if (!d) return "—";
   return format(d, "dd/MM/yyyy HH:mm", { locale: ptBR });
 };
 
 const formatDuration = (start, end) => {
-  const startDate = parseDate(start);
+  const startDate = parseDateLoose(start);
   if (!startDate) return null;
-  const endDate = parseDate(end) || new Date();
+  const endDate = parseDateLoose(end) || new Date();
   const diffMs = endDate - startDate;
   if (diffMs < 0) return null;
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -44,27 +37,6 @@ const formatDuration = (start, end) => {
   return "< 1m";
 };
 
-const pickMetadata = (activity) => {
-  const meta = activity?.metadata || activity?.Metadata || null;
-  if (!meta) return {};
-  if (typeof meta === "string") {
-    try {
-      return JSON.parse(meta);
-    } catch {
-      return {};
-    }
-  }
-  return meta;
-};
-
-const resolveAgentName = (id, fallbackName, agents) => {
-  if (id) {
-    const name = getAgentDisplayName(id, agents, "");
-    if (name) return name;
-  }
-  return fallbackName || "Sem agente";
-};
-
 export default function LeadPJAgentHistory({ lead, activities = [], agents: agentsProp }) {
   const { data: agentsFetched = [] } = useQuery({
     queryKey: ["agents"],
@@ -73,91 +45,10 @@ export default function LeadPJAgentHistory({ lead, activities = [], agents: agen
   });
   const agents = agentsProp || agentsFetched;
 
-  const periods = useMemo(() => {
-    if (!lead) return [];
-
-    const leadCreatedAt =
-      lead.createdAt || lead.createdDate || lead.created_at || lead.created_date;
-
-    const changes = (activities || [])
-      .filter((a) => a && (a.type === "agent_change" || a.Type === "agent_change"))
-      .map((a) => {
-        const meta = pickMetadata(a);
-        const changedAt =
-          a.createdAt || a.created_at || a.scheduledAt || a.scheduled_at;
-        return {
-          changedAt,
-          fromAgentId: meta.from_agent_id || meta.fromAgentId || null,
-          toAgentId:
-            meta.to_agent_id ||
-            meta.toAgentId ||
-            a.assignedTo ||
-            a.assigned_to ||
-            null,
-          fromAgentName: meta.from_agent_name || meta.fromAgentName || null,
-          toAgentName: meta.to_agent_name || meta.toAgentName || null,
-          actorId:
-            meta.actor_id ||
-            meta.actorId ||
-            a.createdBy ||
-            a.created_by ||
-            null,
-          actorName: meta.actor_name || meta.actorName || null,
-        };
-      })
-      .filter((c) => !!c.changedAt)
-      .sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
-
-    const list = [];
-
-    if (changes.length === 0) {
-      list.push({
-        agentId: lead.agentId || lead.agent_id || null,
-        agentName: resolveAgentName(
-          lead.agentId || lead.agent_id || null,
-          null,
-          agents
-        ),
-        from: leadCreatedAt,
-        to: null,
-        reassignedById: null,
-        reassignedByName: null,
-        isCurrent: true,
-      });
-      return list;
-    }
-
-    // Período inicial: do criar do lead até a primeira reatribuição
-    const first = changes[0];
-    list.push({
-      agentId: first.fromAgentId,
-      agentName: resolveAgentName(first.fromAgentId, first.fromAgentName, agents),
-      from: leadCreatedAt,
-      to: first.changedAt,
-      reassignedById: first.actorId,
-      reassignedByName: resolveAgentName(first.actorId, first.actorName, agents),
-      isCurrent: false,
-    });
-
-    // Períodos intermediários e final
-    for (let i = 0; i < changes.length; i += 1) {
-      const current = changes[i];
-      const next = changes[i + 1] || null;
-      list.push({
-        agentId: current.toAgentId,
-        agentName: resolveAgentName(current.toAgentId, current.toAgentName, agents),
-        from: current.changedAt,
-        to: next ? next.changedAt : null,
-        reassignedById: next ? next.actorId : null,
-        reassignedByName: next
-          ? resolveAgentName(next.actorId, next.actorName, agents)
-          : null,
-        isCurrent: !next,
-      });
-    }
-
-    return list;
-  }, [lead, activities, agents]);
+  const periods = useMemo(
+    () => deriveLeadAgentPeriods(lead, activities, agents),
+    [lead, activities, agents]
+  );
 
   if (!lead) return null;
 

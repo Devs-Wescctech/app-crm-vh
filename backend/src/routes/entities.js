@@ -2102,4 +2102,124 @@ router.post('/visits', authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * Relatório consolidado de períodos de responsabilidade por lead PJ
+ * (para auditoria de comissão entre vendedores/filiais).
+ *
+ * Retorna, respeitando visibilidade do usuário logado:
+ *  - leads:      [{ id, razao_social, nome_fantasia, stage, value, agent_id, created_at, ... }]
+ *  - activities: [{ id, lead_id, type:'agent_change', created_at, metadata, assigned_to, created_by }]
+ *
+ * Filtros opcionais (querystring):
+ *  - stage    : filtra leads por stage atual
+ *  - agent_id : inclui leads em que o agente foi responsável em
+ *               *qualquer momento* (atual OU em algum período histórico)
+ *  - team_id  : inclui leads em que algum agente do time foi responsável
+ *               em qualquer momento (atual OU histórico)
+ *
+ * Importante: agent_id e team_id NÃO se restringem ao dono atual do lead,
+ * pois o objetivo do relatório é auditoria de comissão histórica. O front
+ * é quem refina cada período mostrado (e o intervalo de datas).
+ */
+router.get('/reports/lead-pj-agent-periods', authMiddleware, async (req, res) => {
+  try {
+    const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+    const { stage, agent_id: agentId, team_id: teamId } = req.query;
+
+    const whereParts = [];
+    const params = [];
+
+    if (visibleIds === null) {
+      // sem restrição
+    } else if (visibleIds.length === 0) {
+      return res.json({ leads: [], activities: [] });
+    } else {
+      const placeholders = visibleIds.map((_, i) => `$${params.length + i + 1}`).join(',');
+      whereParts.push(`l.agent_id::text IN (${placeholders})`);
+      params.push(...visibleIds);
+    }
+
+    if (stage) {
+      params.push(stage);
+      whereParts.push(`l.stage = $${params.length}`);
+    }
+
+    if (agentId) {
+      // Inclui leads em que o agente foi responsável em qualquer momento:
+      // dono atual OU aparece em algum agent_change como from/to.
+      params.push(agentId);
+      const idx = params.length;
+      whereParts.push(`(
+        l.agent_id::text = $${idx}
+        OR EXISTS (
+          SELECT 1 FROM activities_pj a
+          WHERE a.lead_id = l.id
+            AND a.type = 'agent_change'
+            AND (
+              a.metadata->>'from_agent_id' = $${idx}
+              OR a.metadata->>'to_agent_id' = $${idx}
+              OR a.assigned_to::text = $${idx}
+            )
+        )
+      )`);
+    }
+
+    if (teamId) {
+      // Inclui leads em que algum agente do time foi responsável em
+      // qualquer momento — atual ou histórico.
+      params.push(teamId);
+      const idx = params.length;
+      whereParts.push(`(
+        l.agent_id IN (SELECT id FROM agents WHERE team_id = $${idx})
+        OR EXISTS (
+          SELECT 1 FROM activities_pj a
+          WHERE a.lead_id = l.id
+            AND a.type = 'agent_change'
+            AND (
+              a.metadata->>'from_agent_id' IN (SELECT id::text FROM agents WHERE team_id = $${idx})
+              OR a.metadata->>'to_agent_id' IN (SELECT id::text FROM agents WHERE team_id = $${idx})
+              OR a.assigned_to IN (SELECT id FROM agents WHERE team_id = $${idx})
+            )
+        )
+      )`);
+    }
+
+    const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const leadsSql = `
+      SELECT l.id, l.razao_social, l.nome_fantasia, l.cnpj, l.stage, l.value,
+             l.monthly_value, l.agent_id, l.created_at, l.updated_at, l.concluded
+      FROM leads_pj l
+      ${whereSql}
+      ORDER BY l.created_at DESC
+    `;
+    const leadsResult = await query(leadsSql, params);
+    const leads = leadsResult.rows;
+
+    if (leads.length === 0) {
+      return res.json({ leads: [], activities: [] });
+    }
+
+    const leadIdPlaceholders = leads.map((_, i) => `$${i + 1}`).join(',');
+    const activitiesSql = `
+      SELECT id, lead_id, type, created_at, scheduled_at, assigned_to,
+             created_by, metadata, description
+      FROM activities_pj
+      WHERE type = 'agent_change' AND lead_id IN (${leadIdPlaceholders})
+      ORDER BY created_at ASC
+    `;
+    const activitiesResult = await query(
+      activitiesSql,
+      leads.map(l => l.id)
+    );
+
+    res.json({
+      leads: leads.map(convertKeysToCamel),
+      activities: activitiesResult.rows.map(convertKeysToCamel),
+    });
+  } catch (error) {
+    console.error('Error in lead-pj-agent-periods report:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 export default router;

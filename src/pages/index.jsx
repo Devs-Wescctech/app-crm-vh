@@ -11,6 +11,7 @@ import LeadPJSearch from "./LeadPJSearch";
 import SalesPJReports from "./SalesPJReports";
 import SalesPJWonReport from "./SalesPJWonReport";
 import SalesPJLostReport from "./SalesPJLostReport";
+import SalesPJAgentPeriodsReport from "./SalesPJAgentPeriodsReport";
 import LeadPJReportList from "./LeadPJReportList";
 import LeadPJAutomations from "./LeadPJAutomations";
 import LeadPJDetail from "./LeadPJDetail";
@@ -66,6 +67,7 @@ const PAGES = {
     SalesPJReports: SalesPJReports,
     SalesPJWonReport: SalesPJWonReport,
     SalesPJLostReport: SalesPJLostReport,
+    SalesPJAgentPeriodsReport: SalesPJAgentPeriodsReport,
     LeadPJReportList: LeadPJReportList,
     LeadPJAutomations: LeadPJAutomations,
     LeadPJDetail: LeadPJDetail,
@@ -119,6 +121,7 @@ function PagesContent() {
                 <Route path="/SalesPJReports" element={<SalesPJReports />} />
                 <Route path="/SalesPJWonReport" element={<SalesPJWonReport />} />
                 <Route path="/SalesPJLostReport" element={<SalesPJLostReport />} />
+                <Route path="/SalesPJAgentPeriodsReport" element={<SalesPJAgentPeriodsReport />} />
                 <Route path="/LeadPJReportList" element={<LeadPJReportList />} />
                 <Route path="/LeadPJAutomations" element={<LeadPJAutomations />} />
                 <Route path="/LeadPJDetail" element={<LeadPJDetail />} />

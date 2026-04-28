@@ -218,6 +218,17 @@ export const base44 = {
     processCallAudit: (params) => fetchAPI('/functions/process-call-audit', { method: 'POST', body: JSON.stringify(params) }),
   },
   
+  reports: {
+    leadPjAgentPeriods: async ({ stage, agentId, teamId } = {}) => {
+      const params = new URLSearchParams();
+      if (stage) params.append('stage', stage);
+      if (agentId) params.append('agent_id', agentId);
+      if (teamId) params.append('team_id', teamId);
+      const qs = params.toString();
+      return fetchAPI(`/reports/lead-pj-agent-periods${qs ? `?${qs}` : ''}`);
+    },
+  },
+
   integrations: {
     Core: {
       InvokeLLM: (params) => fetchAPI('/functions/ai-assistant', { method: 'POST', body: JSON.stringify(params) }),

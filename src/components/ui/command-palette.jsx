@@ -21,6 +21,7 @@ import {
   Trophy,
   Zap,
   Building2,
+  History,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -33,6 +34,7 @@ const commands = [
   { id: 6, title: "Agenda", url: "SalesAgenda", icon: CalendarIcon, category: "Vendas PJ" },
   { id: 7, title: "Relatórios PJ", url: "SalesPJReports", icon: FileBarChart, category: "Vendas PJ" },
   { id: 8, title: "Rel. de Ganhos", url: "SalesPJWonReport", icon: Trophy, category: "Vendas PJ" },
+  { id: 13, title: "Períodos de Responsabilidade", url: "SalesPJAgentPeriodsReport", icon: History, category: "Vendas PJ" },
   { id: 9, title: "Automações", url: "LeadPJAutomations", icon: Zap, category: "Vendas PJ" },
   { id: 10, title: "Tarefas", url: "SalesTasks", icon: CheckSquare, category: "Vendas PJ" },
   { id: 11, title: "Templates de Proposta", url: "ProposalTemplates", icon: FileText, category: "Vendas PJ" },
