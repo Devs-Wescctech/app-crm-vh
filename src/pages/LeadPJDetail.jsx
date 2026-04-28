@@ -120,6 +120,9 @@ export default function LeadPJDetail() {
   const [newProposalNote, setNewProposalNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
+  const [newItem, setNewItem] = useState({ descricao: "", quantidade: "1", valorUnitario: "" });
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editingItemDraft, setEditingItemDraft] = useState({ descricao: "", quantidade: "", valorUnitario: "" });
   const fileInputRef = useRef(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
@@ -206,6 +209,115 @@ export default function LeadPJDetail() {
     },
     onError: (err) => toast.error(err?.message || 'Erro ao remover nota'),
   });
+
+  const { data: proposalItems = [] } = useQuery({
+    queryKey: ['leadPJProposalItems', leadId],
+    queryFn: () => base44.entities.LeadPJProposalItem.filter({ lead_id: leadId }),
+    enabled: !!leadId,
+    staleTime: 0,
+  });
+
+  const invalidateProposalItems = () => {
+    queryClient.invalidateQueries({ queryKey: ['leadPJProposalItems', leadId] });
+    queryClient.invalidateQueries({ queryKey: ['leadPJ', leadId] });
+    queryClient.invalidateQueries({ queryKey: ['leadsPJ'] });
+  };
+
+  const createProposalItemMutation = useMutation({
+    mutationFn: (data) => base44.entities.LeadPJProposalItem.create(data),
+    onSuccess: () => {
+      invalidateProposalItems();
+      setNewItem({ descricao: "", quantidade: "1", valorUnitario: "" });
+      toast.success('Item adicionado!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao adicionar item'),
+  });
+
+  const updateProposalItemMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.LeadPJProposalItem.update(id, data),
+    onSuccess: () => {
+      invalidateProposalItems();
+      setEditingItemId(null);
+      setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "" });
+      toast.success('Item atualizado!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao atualizar item'),
+  });
+
+  const deleteProposalItemMutation = useMutation({
+    mutationFn: (id) => base44.entities.LeadPJProposalItem.delete(id),
+    onSuccess: () => {
+      invalidateProposalItems();
+      toast.success('Item removido!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover item'),
+  });
+
+  const proposalItemsTotal = proposalItems.reduce(
+    (sum, it) => sum + (parseFloat(it.quantidade) || 0) * (parseFloat(it.valorUnitario ?? it.valor_unitario) || 0),
+    0
+  );
+
+  const handleAddProposalItem = () => {
+    const descricao = (newItem.descricao || '').trim();
+    const quantidade = parseFloat(newItem.quantidade);
+    const valorUnitario = parseFloat(newItem.valorUnitario);
+    if (!descricao) {
+      toast.error('Informe a descrição do item');
+      return;
+    }
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      toast.error('Quantidade deve ser maior que zero');
+      return;
+    }
+    if (!Number.isFinite(valorUnitario) || valorUnitario < 0) {
+      toast.error('Valor unitário deve ser maior ou igual a zero');
+      return;
+    }
+    createProposalItemMutation.mutate({
+      lead_id: leadId,
+      descricao,
+      quantidade,
+      valor_unitario: valorUnitario,
+      sort_order: proposalItems.length,
+    });
+  };
+
+  const startEditingItem = (item) => {
+    setEditingItemId(item.id);
+    setEditingItemDraft({
+      descricao: item.descricao || '',
+      quantidade: String(item.quantidade ?? ''),
+      valorUnitario: String(item.valorUnitario ?? item.valor_unitario ?? ''),
+    });
+  };
+
+  const cancelEditingItem = () => {
+    setEditingItemId(null);
+    setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "" });
+  };
+
+  const handleSaveEditingItem = () => {
+    const descricao = (editingItemDraft.descricao || '').trim();
+    const quantidade = parseFloat(editingItemDraft.quantidade);
+    const valorUnitario = parseFloat(editingItemDraft.valorUnitario);
+    if (!descricao) {
+      toast.error('Informe a descrição do item');
+      return;
+    }
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      toast.error('Quantidade deve ser maior que zero');
+      return;
+    }
+    if (!Number.isFinite(valorUnitario) || valorUnitario < 0) {
+      toast.error('Valor unitário deve ser maior ou igual a zero');
+      return;
+    }
+    updateProposalItemMutation.mutate({
+      id: editingItemId,
+      data: { descricao, quantidade, valor_unitario: valorUnitario },
+    });
+  };
 
   const { data: proposalFiles = [] } = useQuery({
     queryKey: ['leadPJFiles', leadId],
@@ -1035,10 +1147,18 @@ export default function LeadPJDetail() {
             {/* Metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-1 gap-3 shrink-0">
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10">
-                <p className="text-white/70 text-xs uppercase tracking-wide">Valor Mensal</p>
+                <p className="text-white/70 text-xs uppercase tracking-wide">Total Proposta</p>
                 <p className="text-2xl font-bold text-white">
-                  R$ {parseFloat(lead.monthly_value || lead.monthlyValue || 0).toFixed(2)}
+                  R$ {(proposalItemsTotal > 0
+                      ? proposalItemsTotal
+                      : parseFloat(lead.value || lead.monthly_value || lead.monthlyValue || 0)
+                    ).toFixed(2)}
                 </p>
+                {proposalItems.length > 0 && (
+                  <p className="text-white/60 text-[11px] mt-1">
+                    {proposalItems.length} {proposalItems.length === 1 ? 'item' : 'itens'}
+                  </p>
+                )}
               </div>
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10">
                 <p className="text-white/70 text-xs uppercase tracking-wide">Funcionários</p>
@@ -1896,24 +2016,186 @@ export default function LeadPJDetail() {
               <CardHeader className="border-b border-green-200 dark:border-green-700">
                 <CardTitle className="flex items-center gap-2 text-green-800 dark:text-green-200">
                   <DollarSign className="w-5 h-5" />
-                  Valores Financeiros
+                  Itens da Proposta
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-4 space-y-3">
-                <div>
-                  <Label className="text-sm text-green-800 dark:text-green-300">Valor Mensal Proposto</Label>
+              <CardContent className="pt-4 space-y-4">
+                <div className="space-y-2">
+                  {proposalItems.length === 0 ? (
+                    <div className="text-center py-4 text-sm text-green-800/70 dark:text-green-300/70 bg-white/60 dark:bg-gray-900/40 rounded-lg border border-dashed border-green-300 dark:border-green-700">
+                      Nenhum item cadastrado ainda. Adicione os produtos/serviços que compõem a proposta.
+                    </div>
+                  ) : (
+                    proposalItems.map((item) => {
+                      const isEditing = editingItemId === item.id;
+                      const qty = parseFloat(item.quantidade) || 0;
+                      const unit = parseFloat(item.valorUnitario ?? item.valor_unitario) || 0;
+                      const subtotal = qty * unit;
+                      return (
+                        <div
+                          key={item.id}
+                          className="bg-white dark:bg-gray-800 border border-green-200 dark:border-green-700 rounded-lg p-3 shadow-sm"
+                        >
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <div>
+                                <Label className="text-xs text-gray-600 dark:text-gray-300">Descrição</Label>
+                                <Input
+                                  value={editingItemDraft.descricao}
+                                  onChange={(e) => setEditingItemDraft({ ...editingItemDraft, descricao: e.target.value })}
+                                  placeholder="Ex: Plano corporativo Premium"
+                                  className="mt-1"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-xs text-gray-600 dark:text-gray-300">Quantidade</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    min="0"
+                                    value={editingItemDraft.quantidade}
+                                    onChange={(e) => setEditingItemDraft({ ...editingItemDraft, quantidade: e.target.value })}
+                                    className="mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs text-gray-600 dark:text-gray-300">Valor Unitário (R$)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={editingItemDraft.valorUnitario}
+                                    onChange={(e) => setEditingItemDraft({ ...editingItemDraft, valorUnitario: e.target.value })}
+                                    className="mt-1"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-end gap-2 pt-1">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={cancelEditingItem}
+                                  disabled={updateProposalItemMutation.isPending}
+                                >
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSaveEditingItem}
+                                  disabled={updateProposalItemMutation.isPending}
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  {updateProposalItemMutation.isPending ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    'Salvar'
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 break-words">
+                                  {item.descricao}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  {qty.toLocaleString('pt-BR')} × {formatCurrency(unit)}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <span className="text-sm font-bold text-green-700 dark:text-green-300 whitespace-nowrap">
+                                  {formatCurrency(subtotal)}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => startEditingItem(item)}
+                                    className="h-7 w-7 p-0 text-gray-500 hover:text-green-700"
+                                    title="Editar item"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setConfirmDialog({
+                                        isOpen: true,
+                                        title: 'Remover item',
+                                        message: `Remover "${item.descricao}" da proposta?`,
+                                        confirmLabel: 'Remover',
+                                        variant: 'destructive',
+                                        onConfirm: () => deleteProposalItemMutation.mutate(item.id),
+                                      });
+                                    }}
+                                    className="h-7 w-7 p-0 text-gray-500 hover:text-red-600"
+                                    title="Remover item"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="bg-white/80 dark:bg-gray-900/50 border border-green-200 dark:border-green-700 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-green-800 dark:text-green-300">Adicionar item</p>
                   <Input
-                    type="number"
-                    step="0.01"
-                    value={editedLead.monthlyValue !== undefined && editedLead.monthlyValue !== null ? editedLead.monthlyValue : (lead.monthlyValue || "")}
-                    onChange={(e) => handleFieldChange('monthlyValue', e.target.value)}
-                    placeholder="0.00"
-                    className="mt-1 bg-white dark:bg-gray-800 border-green-300 dark:border-green-700"
+                    value={newItem.descricao}
+                    onChange={(e) => setNewItem({ ...newItem, descricao: e.target.value })}
+                    placeholder="Descrição do produto/serviço"
+                    className="bg-white dark:bg-gray-800"
                   />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-gray-600 dark:text-gray-300">Quantidade</Label>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={newItem.quantidade}
+                        onChange={(e) => setNewItem({ ...newItem, quantidade: e.target.value })}
+                        className="mt-1 bg-white dark:bg-gray-800"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 dark:text-gray-300">Valor Unitário (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={newItem.valorUnitario}
+                        onChange={(e) => setNewItem({ ...newItem, valorUnitario: e.target.value })}
+                        placeholder="0.00"
+                        className="mt-1 bg-white dark:bg-gray-800"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleAddProposalItem}
+                    disabled={createProposalItemMutation.isPending}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                    size="sm"
+                  >
+                    {createProposalItemMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <Plus className="w-4 h-4 mr-1" />
+                    )}
+                    Adicionar item
+                  </Button>
                 </div>
 
                 {lead.monthlyRevenue && (
-                  <div>
+                  <div className="pt-1">
                     <Label className="text-sm text-green-800 dark:text-green-300">Faturamento Mensal</Label>
                     <p className="text-lg font-bold text-green-700 dark:text-green-300 mt-1">
                       {formatCurrency(lead.monthlyRevenue)}
@@ -1921,21 +2203,24 @@ export default function LeadPJDetail() {
                   </div>
                 )}
 
-                {((editedLead.monthlyValue !== undefined && editedLead.monthlyValue !== null && editedLead.monthlyValue !== "") || 
-                  (lead.value !== undefined && lead.value !== null)) && (
-                  <div className="pt-3 border-t border-green-300 dark:border-green-700">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg text-center shadow-sm">
-                      <p className="text-xs text-green-700 dark:text-green-400 mb-1">Valor Estimado do Negócio</p>
-                      <p className="text-2xl font-bold text-green-800 dark:text-green-200">
-                        {formatCurrency(
-                          editedLead.monthlyValue !== undefined && editedLead.monthlyValue !== null && editedLead.monthlyValue !== ""
-                            ? editedLead.monthlyValue
-                            : lead.value
-                        )}
+                <div className="pt-2 border-t border-green-300 dark:border-green-700">
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg text-center shadow-sm">
+                    <p className="text-xs text-green-700 dark:text-green-400 mb-1">Total da Proposta</p>
+                    <p className="text-2xl font-bold text-green-800 dark:text-green-200">
+                      {formatCurrency(proposalItemsTotal)}
+                    </p>
+                    {proposalItems.length > 0 && (
+                      <p className="text-xs text-green-700/80 dark:text-green-400/80 mt-1">
+                        {proposalItems.length} {proposalItems.length === 1 ? 'item' : 'itens'} cadastrado{proposalItems.length === 1 ? '' : 's'}
                       </p>
-                    </div>
+                    )}
+                    {proposalItems.length === 0 && (lead.value || lead.monthlyValue) ? (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-2">
+                        Valor legado registrado: {formatCurrency(lead.value || lead.monthlyValue)}. Adicione itens para substituir.
+                      </p>
+                    ) : null}
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
           </div>

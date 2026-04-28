@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { createCrudRouter, filterValidColumns } from '../utils/crud.js';
 import { authMiddleware, optionalAuth } from '../middleware/auth.js';
-import { query } from '../config/database.js';
+import { query, pool } from '../config/database.js';
 import { 
   notifyLeadAssigned, 
   notifyLeadStageChanged, 
@@ -1171,6 +1171,196 @@ router.delete('/lead-notes-pj/:id', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting lead-notes-pj:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// =====================================================================
+// LEAD PJ PROPOSAL ITEMS (múltiplos produtos por proposta)
+// =====================================================================
+async function recomputeLeadPjValueFromItems(leadId, executor = query) {
+  const sumResult = await executor(
+    `SELECT COALESCE(SUM(quantidade * valor_unitario), 0) AS total
+       FROM lead_pj_proposal_items
+      WHERE lead_id = $1`,
+    [leadId]
+  );
+  const total = Number(sumResult.rows[0]?.total || 0);
+  await executor('UPDATE leads_pj SET value = $1, updated_at = NOW() WHERE id = $2', [total, leadId]);
+  return total;
+}
+
+async function withTransaction(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const exec = (text, params) => client.query(text, params);
+    const result = await fn(exec);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function fetchProposalItemsByLead(leadId) {
+  const result = await query(
+    `SELECT * FROM lead_pj_proposal_items
+       WHERE lead_id = $1
+       ORDER BY sort_order ASC, created_at ASC`,
+    [leadId]
+  );
+  return result.rows.map(convertKeysToCamel);
+}
+
+router.get('/lead-pj-proposal-items', authMiddleware, async (req, res) => {
+  try {
+    const leadId = req.query.lead_id || req.query.leadId;
+    if (!leadId) return res.status(400).json({ message: 'lead_id is required' });
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+    res.json(await fetchProposalItemsByLead(leadId));
+  } catch (error) {
+    console.error('Error listing lead-pj-proposal-items:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/lead-pj-proposal-items/filter', authMiddleware, async (req, res) => {
+  try {
+    const filters = req.body || {};
+    const leadId = filters.lead_id || filters.leadId;
+    if (!leadId) return res.status(400).json({ message: 'lead_id is required' });
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+    res.json(await fetchProposalItemsByLead(leadId));
+  } catch (error) {
+    console.error('Error filtering lead-pj-proposal-items:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+function parseItemPayload(body) {
+  const data = convertKeysToSnake(body || {});
+  const descricao = (data.descricao || '').toString().trim();
+  const quantidadeRaw = data.quantidade;
+  const valorUnitarioRaw = data.valor_unitario;
+  const sortOrderRaw = data.sort_order;
+  const quantidade = quantidadeRaw === undefined || quantidadeRaw === null || quantidadeRaw === ''
+    ? 1
+    : Number(quantidadeRaw);
+  const valorUnitario = valorUnitarioRaw === undefined || valorUnitarioRaw === null || valorUnitarioRaw === ''
+    ? 0
+    : Number(valorUnitarioRaw);
+  const sortOrderProvided = !(sortOrderRaw === undefined || sortOrderRaw === null || sortOrderRaw === '');
+  const sortOrder = sortOrderProvided ? Number(sortOrderRaw) : null;
+  return {
+    lead_id: data.lead_id,
+    descricao,
+    quantidade,
+    valor_unitario: valorUnitario,
+    sort_order: sortOrder,
+    sort_order_provided: sortOrderProvided,
+  };
+}
+
+function validateItem({ descricao, quantidade, valor_unitario }) {
+  if (!descricao) return 'descricao is required';
+  if (!Number.isFinite(quantidade) || quantidade <= 0) return 'quantidade must be greater than 0';
+  if (!Number.isFinite(valor_unitario) || valor_unitario < 0) return 'valor_unitario must be >= 0';
+  return null;
+}
+
+router.post('/lead-pj-proposal-items', authMiddleware, async (req, res) => {
+  try {
+    const payload = parseItemPayload(req.body);
+    if (!payload.lead_id) return res.status(400).json({ message: 'lead_id is required' });
+    const validationError = validateItem(payload);
+    if (validationError) return res.status(400).json({ message: validationError });
+
+    const visibility = await assertLeadVisibleForUser(payload.lead_id, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    const sortOrder = payload.sort_order_provided ? payload.sort_order : 0;
+
+    const inserted = await withTransaction(async (exec) => {
+      const result = await exec(
+        `INSERT INTO lead_pj_proposal_items (lead_id, descricao, quantidade, valor_unitario, sort_order)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [payload.lead_id, payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder]
+      );
+      await recomputeLeadPjValueFromItems(payload.lead_id, exec);
+      return result.rows[0];
+    });
+    res.status(201).json(convertKeysToCamel(inserted));
+  } catch (error) {
+    console.error('Error creating lead-pj-proposal-items:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.put('/lead-pj-proposal-items/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await query(
+      'SELECT lead_id, sort_order FROM lead_pj_proposal_items WHERE id = $1',
+      [id]
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ message: 'Item not found' });
+    const leadId = existing.rows[0].lead_id;
+    const existingSortOrder = existing.rows[0].sort_order;
+
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    const payload = parseItemPayload({ ...req.body, lead_id: leadId });
+    const validationError = validateItem(payload);
+    if (validationError) return res.status(400).json({ message: validationError });
+
+    const sortOrder = payload.sort_order_provided ? payload.sort_order : existingSortOrder;
+
+    const updated = await withTransaction(async (exec) => {
+      const result = await exec(
+        `UPDATE lead_pj_proposal_items
+            SET descricao = $1,
+                quantidade = $2,
+                valor_unitario = $3,
+                sort_order = $4,
+                updated_at = NOW()
+          WHERE id = $5
+          RETURNING *`,
+        [payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder, id]
+      );
+      await recomputeLeadPjValueFromItems(leadId, exec);
+      return result.rows[0];
+    });
+    res.json(convertKeysToCamel(updated));
+  } catch (error) {
+    console.error('Error updating lead-pj-proposal-items:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/lead-pj-proposal-items/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await query('SELECT lead_id FROM lead_pj_proposal_items WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ message: 'Item not found' });
+    const leadId = existing.rows[0].lead_id;
+
+    const visibility = await assertLeadVisibleForUser(leadId, req.user?.id);
+    if (!visibility.ok) return res.status(visibility.status).json({ message: visibility.message });
+
+    await withTransaction(async (exec) => {
+      await exec('DELETE FROM lead_pj_proposal_items WHERE id = $1', [id]);
+      await recomputeLeadPjValueFromItems(leadId, exec);
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting lead-pj-proposal-items:', error);
     res.status(500).json({ message: error.message });
   }
 });

@@ -784,6 +784,35 @@ CREATE TABLE IF NOT EXISTS lead_pj_files (
 CREATE INDEX IF NOT EXISTS idx_lead_pj_files_lead_id ON lead_pj_files(lead_id);
 
 -- =====================
+-- LEAD PJ PROPOSAL ITEMS (Múltiplos produtos por proposta)
+-- =====================
+CREATE TABLE IF NOT EXISTS lead_pj_proposal_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    lead_id UUID NOT NULL REFERENCES leads_pj(id) ON DELETE CASCADE,
+    descricao VARCHAR(500) NOT NULL,
+    quantidade NUMERIC(12,3) NOT NULL DEFAULT 1 CHECK (quantidade > 0),
+    valor_unitario NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (valor_unitario >= 0),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_pj_proposal_items_lead_id ON lead_pj_proposal_items(lead_id);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'lead_pj_proposal_items_quantidade_check'
+  ) THEN
+    ALTER TABLE lead_pj_proposal_items
+      ADD CONSTRAINT lead_pj_proposal_items_quantidade_check CHECK (quantidade > 0);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'lead_pj_proposal_items_valor_unitario_check'
+  ) THEN
+    ALTER TABLE lead_pj_proposal_items
+      ADD CONSTRAINT lead_pj_proposal_items_valor_unitario_check CHECK (valor_unitario >= 0);
+  END IF;
+END $$;
+
+-- =====================
 -- REFERRAL AUTOMATIONS
 -- =====================
 CREATE TABLE IF NOT EXISTS referral_automations (
