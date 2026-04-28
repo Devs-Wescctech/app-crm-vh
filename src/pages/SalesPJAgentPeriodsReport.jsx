@@ -21,7 +21,16 @@ import {
   UserCog,
   Users,
   ArrowRight,
+  PieChart as PieChartIcon,
 } from "lucide-react";
+import {
+  ResponsiveContainer,
+  PieChart as RePieChart,
+  Pie,
+  Cell,
+  Tooltip as ReTooltip,
+  Legend,
+} from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -42,6 +51,19 @@ import {
 } from "@/utils/leadPjAgentPeriods";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const CHART_COLORS = [
+  "#6366f1",
+  "#22c55e",
+  "#f97316",
+  "#eab308",
+  "#ec4899",
+  "#06b6d4",
+  "#8b5cf6",
+  "#94a3b8",
+];
+
+const CHART_TOP_N = 6;
 
 const formatBRL = (value) =>
   new Intl.NumberFormat("pt-BR", {
@@ -355,6 +377,39 @@ export default function SalesPJAgentPeriodsReport() {
   ]);
 
   const agentSummary = useMemo(() => computeAgentSummary(rows), [rows]);
+
+  const chartData = useMemo(() => {
+    const sorted = [...agentSummary.summary]
+      .filter((s) => s.totalDays > 0)
+      .sort((a, b) => b.totalDays - a.totalDays);
+
+    if (sorted.length <= CHART_TOP_N) {
+      return sorted.map((s) => ({
+        name: s.agentName,
+        value: Number(s.totalDays.toFixed(2)),
+        leadCount: s.leadCount,
+      }));
+    }
+
+    const top = sorted.slice(0, CHART_TOP_N);
+    const others = sorted.slice(CHART_TOP_N);
+    const othersDays = others.reduce((acc, s) => acc + s.totalDays, 0);
+    const othersLeads = others.reduce((acc, s) => acc + s.leadCount, 0);
+
+    return [
+      ...top.map((s) => ({
+        name: s.agentName,
+        value: Number(s.totalDays.toFixed(2)),
+        leadCount: s.leadCount,
+      })),
+      {
+        name: `Outros (${others.length})`,
+        value: Number(othersDays.toFixed(2)),
+        leadCount: othersLeads,
+        isOthers: true,
+      },
+    ];
+  }, [agentSummary]);
 
   const stats = useMemo(() => {
     const leadIds = new Set();
@@ -681,20 +736,92 @@ export default function SalesPJAgentPeriodsReport() {
         </Card>
       </div>
 
-      <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-        <CardHeader className="border-b border-gray-200 dark:border-gray-800">
-          <CardTitle className="text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <UserCog className="w-5 h-5" />
-            Resumo por vendedor
-          </CardTitle>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Agregado dos períodos da página atual — útil para distribuir
-            comissão proporcional ao tempo de posse de cada lead. Para o
-            cálculo completo em todas as páginas, exporte o CSV.
-          </p>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 xl:col-span-1">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+            <CardTitle className="text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <PieChartIcon className="w-5 h-5" />
+              Divisão de tempo de responsabilidade
+            </CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Proporção de dias por vendedor — top {CHART_TOP_N}, com
+              &quot;Outros&quot; agrupando o restante. Respeita os filtros
+              aplicados.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4">
+            {isLoading || isFetching ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                Carregando…
+              </div>
+            ) : chartData.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-gray-500 dark:text-gray-400 text-center px-4">
+                Sem dados para o gráfico nos filtros atuais.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={320}>
+                <RePieChart>
+                  <Pie
+                    data={chartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="name"
+                    label={({ percent }) =>
+                      percent >= 0.05
+                        ? `${(percent * 100).toFixed(0)}%`
+                        : ""
+                    }
+                    labelLine={false}
+                  >
+                    {chartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={
+                          entry.isOthers
+                            ? "#94a3b8"
+                            : CHART_COLORS[index % CHART_COLORS.length]
+                        }
+                      />
+                    ))}
+                  </Pie>
+                  <ReTooltip
+                    formatter={(value, name, item) => {
+                      const leadCount = item?.payload?.leadCount ?? 0;
+                      return [
+                        `${formatDays(value)} dias (${leadCount} leads)`,
+                        name,
+                      ];
+                    }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={48}
+                    wrapperStyle={{ fontSize: 12 }}
+                  />
+                </RePieChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 xl:col-span-2">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+            <CardTitle className="text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <UserCog className="w-5 h-5" />
+              Resumo por vendedor
+            </CardTitle>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Agregado dos períodos da página atual — útil para distribuir
+              comissão proporcional ao tempo de posse de cada lead. Para o
+              cálculo completo em todas as páginas, exporte o CSV.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
@@ -793,9 +920,10 @@ export default function SalesPJAgentPeriodsReport() {
                 )}
               </tbody>
             </table>
-          </div>
-        </CardContent>
-      </Card>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <CardHeader className="border-b border-gray-200 dark:border-gray-800">
