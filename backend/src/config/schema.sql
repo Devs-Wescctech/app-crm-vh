@@ -890,6 +890,9 @@ ALTER TABLE sla_policies ADD COLUMN IF NOT EXISTS first_response_minutes INTEGER
 ALTER TABLE sla_policies ADD COLUMN IF NOT EXISTS resolution_minutes INTEGER;
 ALTER TABLE sla_policies ADD COLUMN IF NOT EXISTS pause_on_statuses TEXT[] DEFAULT '{"awaiting_customer", "awaiting_third_party", "on_hold"}';
 
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS original_assigned_to VARCHAR(255);
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS reassigned_at TIMESTAMP;
+
 -- =====================
 -- INDEXES
 -- =====================

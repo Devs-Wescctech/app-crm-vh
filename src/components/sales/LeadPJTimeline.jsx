@@ -201,11 +201,22 @@ export default function LeadPJTimeline({ activities, agents: agentsProp }) {
                 )}
 
                 {(activity.assignedTo || activity.assigned_to) && (
-                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 flex-wrap">
                     <User className="w-3.5 h-3.5 text-gray-400" />
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       Responsável: <span className="font-medium">{getAgentDisplayName(activity.assignedTo || activity.assigned_to, agents)}</span>
                     </span>
+                    {(activity.originalAssignedTo || activity.original_assigned_to) &&
+                      String(activity.originalAssignedTo || activity.original_assigned_to) !==
+                        String(activity.assignedTo || activity.assigned_to) && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                          title="Esta atividade foi reatribuída"
+                        >
+                          <ArrowRight className="w-3 h-3" />
+                          Originalmente de {getAgentDisplayName(activity.originalAssignedTo || activity.original_assigned_to, agents)}
+                        </span>
+                      )}
                   </div>
                 )}
                 

@@ -130,6 +130,7 @@ export default function LeadPJDetail() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [reassignAgentId, setReassignAgentId] = useState("");
+  const [transferPendingActivities, setTransferPendingActivities] = useState(true);
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -460,13 +461,35 @@ export default function LeadPJDetail() {
   });
 
   const reassignAgentMutation = useMutation({
-    mutationFn: (newAgentId) => base44.entities.LeadPJ.update(leadId, { agentId: newAgentId }),
-    onSuccess: () => {
+    mutationFn: ({ newAgentId, transferPending }) =>
+      base44.entities.LeadPJ.update(leadId, {
+        agentId: newAgentId,
+        transferPendingActivities: transferPending,
+      }),
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['leadPJ', leadId] });
       queryClient.invalidateQueries({ queryKey: ['leadsPJ'] });
       queryClient.invalidateQueries({ queryKey: ['activitiesPJ', leadId] });
+      queryClient.invalidateQueries({ queryKey: ['activitiesPJ'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
       setReassignAgentId("");
-      toast.success('Agente responsável atualizado!');
+      setTransferPendingActivities(true);
+
+      const summary = data?.reassignmentSummary;
+      if (summary?.transferRequested && summary?.transferError) {
+        toast.warning(
+          'Agente responsável atualizado, mas houve falha ao transferir as atividades pendentes. Verifique e refaça se necessário.'
+        );
+      } else if (summary?.transferApplied && summary.transferredCount > 0) {
+        const n = summary.transferredCount;
+        toast.success(
+          `Agente responsável atualizado e ${n} ${n === 1 ? 'atividade pendente foi transferida' : 'atividades pendentes foram transferidas'} para o novo responsável.`
+        );
+      } else if (variables?.transferPending) {
+        toast.success('Agente responsável atualizado. Nenhuma atividade pendente para transferir.');
+      } else {
+        toast.success('Agente responsável atualizado.');
+      }
     },
     onError: (err) => {
       toast.error(err?.message || 'Não foi possível reatribuir o agente.');
@@ -475,7 +498,10 @@ export default function LeadPJDetail() {
 
   const handleReassignAgent = () => {
     if (!reassignAgentId) return;
-    reassignAgentMutation.mutate(reassignAgentId);
+    reassignAgentMutation.mutate({
+      newAgentId: reassignAgentId,
+      transferPending: transferPendingActivities,
+    });
   };
 
   const createActivityMutation = useMutation({
@@ -1814,8 +1840,30 @@ export default function LeadPJDetail() {
                         )}
                       </Button>
                     </div>
+                    {(() => {
+                      const transferableCount = activities.filter(
+                        (a) => !a.completed && a.type !== 'agent_change'
+                      ).length;
+                      return (
+                        <label className="flex items-start gap-2 mt-2 cursor-pointer select-none">
+                          <Checkbox
+                            id="transfer-pending-activities"
+                            checked={transferPendingActivities}
+                            onCheckedChange={(checked) => setTransferPendingActivities(checked === true)}
+                            disabled={reassignAgentMutation.isPending}
+                            className="mt-0.5 border-indigo-400 data-[state=checked]:bg-indigo-600 data-[state=checked]:border-indigo-600"
+                          />
+                          <span className="text-xs text-indigo-900 dark:text-indigo-100 leading-snug">
+                            Transferir também as tarefas e atividades pendentes deste lead para o novo agente
+                            {transferableCount > 0 && (
+                              <span className="font-semibold"> ({transferableCount} {transferableCount === 1 ? 'pendente' : 'pendentes'})</span>
+                            )}
+                          </span>
+                        </label>
+                      );
+                    })()}
                     <p className="text-[11px] text-indigo-900/70 dark:text-indigo-100/70">
-                      A troca fica registrada na linha do tempo de atividades do lead.
+                      A troca fica registrada na linha do tempo de atividades do lead. Cada atividade transferida mantém o histórico de quem era o responsável original.
                     </p>
                   </div>
                 )}

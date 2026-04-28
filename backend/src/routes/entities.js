@@ -1476,7 +1476,24 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const data = convertKeysToSnake(req.body);
-    
+
+    // Flag opcional vinda do front para transferir (ou não) as atividades
+    // pendentes do lead em conjunto com a reatribuição. Default = true.
+    // Aceita boolean ou string ("true"/"false"); qualquer outro valor cai no
+    // default (true) para manter o comportamento esperado pela UI.
+    const transferPendingRaw = data.transfer_pending_activities;
+    let transferPendingActivities;
+    if (transferPendingRaw === undefined || transferPendingRaw === null) {
+      transferPendingActivities = true;
+    } else if (typeof transferPendingRaw === 'boolean') {
+      transferPendingActivities = transferPendingRaw;
+    } else if (typeof transferPendingRaw === 'string') {
+      transferPendingActivities = transferPendingRaw.toLowerCase() !== 'false';
+    } else {
+      transferPendingActivities = Boolean(transferPendingRaw);
+    }
+    delete data.transfer_pending_activities;
+
     const oldLeadResult = await query('SELECT * FROM leads_pj WHERE id = $1', [id]);
     const oldLead = oldLeadResult.rows[0];
     
@@ -1537,13 +1554,39 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     values.push(id);
     const sql = `UPDATE leads_pj SET ${setClause} WHERE id = $${values.length} RETURNING *`;
-    
-    const result = await query(sql, values);
-    const lead = result.rows[0];
-    
+
+    let lead;
+    let reassignmentSummary = null;
+
     if (isAgentReassignment) {
+      // Para reatribuição, o update do lead, a transferência das atividades
+      // pendentes e o log de agent_change rodam na mesma transação para evitar
+      // estados inconsistentes (ex.: lead trocado mas atividades órfãs).
+      const client = await pool.connect();
       try {
-        const agentLookup = await query(
+        await client.query('BEGIN');
+
+        const updateRes = await client.query(sql, values);
+        lead = updateRes.rows[0];
+
+        let transferredCount = 0;
+        if (transferPendingActivities && lead.agent_id) {
+          const transferRes = await client.query(
+            `UPDATE activities_pj
+                SET original_assigned_to = COALESCE(original_assigned_to, assigned_to),
+                    assigned_to = $1,
+                    reassigned_at = NOW()
+              WHERE lead_id = $2
+                AND completed = FALSE
+                AND type <> 'agent_change'
+                AND (assigned_to IS DISTINCT FROM $1)
+              RETURNING id`,
+            [String(lead.agent_id), lead.id]
+          );
+          transferredCount = transferRes.rowCount || 0;
+        }
+
+        const agentLookup = await client.query(
           'SELECT id, name FROM agents WHERE id = ANY($1::uuid[])',
           [[oldLead.agent_id, lead.agent_id].filter(Boolean)]
         );
@@ -1552,6 +1595,17 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
         const toName = lead.agent_id ? (nameById.get(String(lead.agent_id)) || 'Agente removido') : 'Sem agente';
         const actorName = actingAgent?.name || actingAgent?.email || 'Sistema';
 
+        let logDescription = `${actorName} reatribuiu o lead de "${fromName}" para "${toName}".`;
+        if (transferPendingActivities) {
+          if (transferredCount > 0) {
+            logDescription += ` ${transferredCount} ${transferredCount === 1 ? 'atividade pendente foi transferida' : 'atividades pendentes foram transferidas'} para o novo responsável.`;
+          } else {
+            logDescription += ' Nenhuma atividade pendente para transferir.';
+          }
+        } else {
+          logDescription += ' As atividades pendentes foram mantidas com o agente anterior.';
+        }
+
         const reassignmentMetadata = {
           from_agent_id: oldLead.agent_id ? String(oldLead.agent_id) : null,
           to_agent_id: lead.agent_id ? String(lead.agent_id) : null,
@@ -1559,31 +1613,61 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
           to_agent_name: toName,
           actor_id: actingAgent?.id ? String(actingAgent.id) : null,
           actor_name: actorName,
+          transfer_requested: transferPendingActivities,
+          transferred_count: transferredCount,
         };
-        await query(
+
+        await client.query(
           `INSERT INTO activities_pj (lead_id, type, title, description, created_by, assigned_to, completed, metadata)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [
             lead.id,
             'agent_change',
             'Agente responsável alterado',
-            `${actorName} reatribuiu o lead de "${fromName}" para "${toName}".`,
+            logDescription,
             actingAgent?.id || null,
             lead.agent_id ? String(lead.agent_id) : null,
             true,
             JSON.stringify(reassignmentMetadata),
           ]
         );
-      } catch (logErr) {
-        console.error('[leads-pj] Falha ao registrar atividade de reatribuição:', logErr.message);
+
+        await client.query('COMMIT');
+
+        reassignmentSummary = {
+          transferRequested: transferPendingActivities,
+          transferApplied: transferPendingActivities,
+          transferredCount,
+          transferError: null,
+        };
+      } catch (txErr) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
+        console.error('[leads-pj] Falha na transação de reatribuição:', txErr.message);
+        return res.status(500).json({
+          message: 'Não foi possível concluir a reatribuição. Nenhuma alteração foi salva.',
+          error: txErr.message,
+        });
+      } finally {
+        client.release();
       }
 
       if (lead.agent_id) {
-        await notifyLeadPJAssigned(lead, lead.agent_id);
+        try {
+          await notifyLeadPJAssigned(lead, lead.agent_id);
+        } catch (notifyErr) {
+          console.error('[leads-pj] Falha ao notificar reatribuição:', notifyErr.message);
+        }
       }
+    } else {
+      const result = await query(sql, values);
+      lead = result.rows[0];
     }
-    
-    res.json(convertKeysToCamel(lead));
+
+    const responseBody = convertKeysToCamel(lead);
+    if (reassignmentSummary) {
+      responseBody.reassignmentSummary = reassignmentSummary;
+    }
+    res.json(responseBody);
   } catch (error) {
     console.error('Error updating lead PJ:', error);
     res.status(500).json({ message: error.message });
