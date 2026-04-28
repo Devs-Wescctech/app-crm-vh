@@ -1507,6 +1507,25 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Lead PJ not found' });
     }
 
+    // Persistir o instante exato em que a venda foi ganha. Sem isso a
+    // atribuição de comissão (`getWonAtTimestamp`) ficava dependente do
+    // `stage_history` e do `updated_at`, que podem ser sobrescritos por
+    // edições posteriores. Em TODA transição para `fechado_ganho` (inclusive
+    // re-ganho: ganho -> outro stage -> ganho de novo) gravamos
+    // `concluded_at` com o instante atual, salvo quando o frontend já
+    // mandou um valor explícito (ex.: `concludeSaleMutation` em
+    // `LeadPJDetail.jsx`). `converted_at` recebe o mesmo timestamp para
+    // manter compatibilidade com relatórios legados.
+    const stageProvided = Object.prototype.hasOwnProperty.call(data, 'stage');
+    const newStage = stageProvided ? data.stage : oldLead.stage;
+    const isWinningTransition =
+      newStage === 'fechado_ganho' && oldLead.stage !== 'fechado_ganho';
+    if (isWinningTransition) {
+      const closedAt = data.concluded_at || new Date().toISOString();
+      data.concluded_at = closedAt;
+      data.converted_at = data.converted_at || closedAt;
+    }
+
     // Reatribuição: se o agente responsável está mudando, somente admin/coordenador
     // (e nunca o próprio vendedor) pode efetuar a troca.
     const isAgentReassignment =

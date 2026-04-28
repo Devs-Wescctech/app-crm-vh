@@ -766,6 +766,58 @@ ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_name VARCHAR(255);
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_role VARCHAR(255);
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
 
+-- Timestamp explícito do fechamento da venda (stage = 'fechado_ganho').
+-- Persistir o instante do ganho desacopla a atribuição de comissão
+-- (`getWonAtTimestamp`) do `stage_history`/`updated_at`, que podem ser
+-- reescritos por outros updates após o lead já ter sido ganho.
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS concluded_at TIMESTAMP;
+
+-- Backfill: para leads já ganhos sem `concluded_at`, aproveita o melhor
+-- timestamp disponível (entrada mais recente de stage_history apontando para
+-- 'fechado_ganho', depois `converted_at`, e por último `updated_at`).
+-- A coluna stage_history pode não existir em todos os ambientes; o branch
+-- dinâmico abaixo evita erro de planejamento quando ela está ausente.
+DO $do_backfill_concluded_at$
+DECLARE
+  has_stage_history boolean;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'leads_pj'
+      AND column_name = 'stage_history'
+      AND table_schema = 'public'
+  ) INTO has_stage_history;
+
+  IF has_stage_history THEN
+    EXECUTE $bf$
+      UPDATE leads_pj
+      SET concluded_at = COALESCE(
+        (
+          SELECT MAX((entry->>'changedAt')::timestamp)
+            FROM jsonb_array_elements(
+              CASE jsonb_typeof(stage_history)
+                WHEN 'array' THEN stage_history
+                ELSE '[]'::jsonb
+              END
+            ) AS entry
+           WHERE entry->>'to' = 'fechado_ganho'
+             AND entry->>'changedAt' IS NOT NULL
+        ),
+        converted_at,
+        updated_at
+      )
+      WHERE concluded_at IS NULL
+        AND (stage = 'fechado_ganho' OR concluded = TRUE)
+    $bf$;
+  ELSE
+    UPDATE leads_pj
+    SET concluded_at = COALESCE(converted_at, updated_at)
+    WHERE concluded_at IS NULL
+      AND (stage = 'fechado_ganho' OR concluded = TRUE);
+  END IF;
+END
+$do_backfill_concluded_at$;
+
 -- =====================
 -- ACTIVITIES PJ — metadata estruturada (ex.: histórico de reatribuição)
 -- =====================

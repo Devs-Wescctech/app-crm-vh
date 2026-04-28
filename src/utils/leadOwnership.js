@@ -94,6 +94,19 @@ export function resolveOwnerAt(lead, activitiesOrChanges, timestamp) {
 export function getWonAtTimestamp(lead) {
   if (!lead) return null;
 
+  // Fonte primária: o backend persiste `concluded_at` no momento exato em que
+  // o lead PJ entra em `fechado_ganho` (PUT /leads-pj/:id). Usar essa coluna
+  // como fonte primária garante que a atribuição de comissão não dependa do
+  // `stage_history` permanecer intacto nem do `updated_at` não ter sido
+  // tocado por updates posteriores ao ganho.
+  const persistedConcludedAt = lead.concludedAt || lead.concluded_at || null;
+  if (persistedConcludedAt) {
+    return persistedConcludedAt;
+  }
+
+  // Fallback para leads antigos (anteriores à coluna `concluded_at`):
+  // tenta a entrada mais recente de `stage_history` apontando para o ganho,
+  // depois o legado `converted_at` e por último `updated_at`.
   const history =
     parseMaybeJson(lead.stageHistory) ||
     parseMaybeJson(lead.stage_history) ||
@@ -117,8 +130,6 @@ export function getWonAtTimestamp(lead) {
   }
 
   return (
-    lead.concludedAt ||
-    lead.concluded_at ||
     lead.convertedAt ||
     lead.converted_at ||
     lead.updatedAt ||
