@@ -28,6 +28,34 @@ export function getTemperatureMonitorIntervalFromSettings(settings) {
   return rounded;
 }
 
+// Settings key controlling how many days of monitor run history are kept
+// before the periodic cleanup deletes older rows. Mirrors the backend constant
+// in backend/src/services/leadTemperatureMonitor.js.
+export const TEMPERATURE_MONITOR_RETENTION_DAYS_KEY = 'lead_temperature_monitor_retention_days';
+
+export const DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS = 30;
+export const MIN_TEMPERATURE_MONITOR_RETENTION_DAYS = 1;
+export const MAX_TEMPERATURE_MONITOR_RETENTION_DAYS = 365;
+
+export function getTemperatureMonitorRetentionDaysFromSettings(settings) {
+  if (!Array.isArray(settings)) return DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  const setting = settings.find(
+    (s) =>
+      (s.setting_key || s.settingKey) === TEMPERATURE_MONITOR_RETENTION_DAYS_KEY
+  );
+  if (!setting) return DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  const raw = setting.setting_value ?? setting.settingValue;
+  if (raw === null || raw === undefined || raw === '') {
+    return DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  const rounded = Math.round(n);
+  if (rounded < MIN_TEMPERATURE_MONITOR_RETENTION_DAYS) return MIN_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  if (rounded > MAX_TEMPERATURE_MONITOR_RETENTION_DAYS) return MAX_TEMPERATURE_MONITOR_RETENTION_DAYS;
+  return rounded;
+}
+
 export const DEFAULT_TEMPERATURE_RULES = {
   hot: {
     maxDaysSinceContact: 2,

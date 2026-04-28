@@ -22,6 +22,11 @@ import {
   MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES,
   MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES,
   getTemperatureMonitorIntervalFromSettings,
+  TEMPERATURE_MONITOR_RETENTION_DAYS_KEY,
+  DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS,
+  MIN_TEMPERATURE_MONITOR_RETENTION_DAYS,
+  MAX_TEMPERATURE_MONITOR_RETENTION_DAYS,
+  getTemperatureMonitorRetentionDaysFromSettings,
 } from "@/components/utils/temperature";
 
 export default function Settings() {
@@ -70,7 +75,12 @@ export default function Settings() {
         return list;
       });
       queryClient.refetchQueries({ queryKey: ['systemSettings'] });
-      toast.success('Configuração salva com sucesso!');
+      // Some callers (e.g. the monitor cadence editor) may save multiple keys
+      // back-to-back and want to show a single combined toast at the end —
+      // they pass `silent: true` to suppress the per-write toast here.
+      if (!variables?.silent) {
+        toast.success('Configuração salva com sucesso!');
+      }
     },
     onError: (error) => {
       toast.error(`Erro ao salvar: ${error?.message || 'tente novamente'}`);
@@ -591,13 +601,17 @@ function describeIntervalMinutes(minutes) {
 
 function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false }) {
   const savedMinutes = getTemperatureMonitorIntervalFromSettings(settings);
+  const savedRetentionDays = getTemperatureMonitorRetentionDaysFromSettings(settings);
 
   const [value, setValue] = useState(() => String(savedMinutes));
+  const [retentionValue, setRetentionValue] = useState(() => String(savedRetentionDays));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [retentionDirty, setRetentionDirty] = useState(false);
   const [runningNow, setRunningNow] = useState(false);
   const [lastRun, setLastRun] = useState(null);
   const lastSyncedRef = useRef(null);
+  const lastRetentionSyncedRef = useRef(null);
 
   useEffect(() => {
     const key = String(savedMinutes);
@@ -607,15 +621,30 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
     setValue(key);
   }, [savedMinutes, dirty]);
 
+  useEffect(() => {
+    const key = String(savedRetentionDays);
+    if (lastRetentionSyncedRef.current === key) return;
+    if (retentionDirty) return;
+    lastRetentionSyncedRef.current = key;
+    setRetentionValue(key);
+  }, [savedRetentionDays, retentionDirty]);
+
   const update = (next) => {
     setDirty(true);
     setValue(next);
   };
 
+  const updateRetention = (next) => {
+    setRetentionDirty(true);
+    setRetentionValue(next);
+  };
+
   const handleReset = () => {
     setValue(String(DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES));
     setDirty(true);
-    toast.success('Cadência restaurada ao padrão — clique em Salvar para confirmar');
+    setRetentionValue(String(DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS));
+    setRetentionDirty(true);
+    toast.success('Valores restaurados ao padrão — clique em Salvar para confirmar');
   };
 
   const handleSave = async () => {
@@ -637,16 +666,70 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
       return;
     }
 
+    if (retentionValue === '' || retentionValue === null || retentionValue === undefined) {
+      toast.error('Informe a retenção do histórico em dias.');
+      return;
+    }
+    const r = Number(retentionValue);
+    if (!Number.isFinite(r) || r <= 0 || Math.floor(r) !== r) {
+      toast.error('Informe um número inteiro de dias maior que zero para a retenção.');
+      return;
+    }
+    if (r < MIN_TEMPERATURE_MONITOR_RETENTION_DAYS) {
+      toast.error(`Retenção mínima: ${MIN_TEMPERATURE_MONITOR_RETENTION_DAYS} dia(s).`);
+      return;
+    }
+    if (r > MAX_TEMPERATURE_MONITOR_RETENTION_DAYS) {
+      toast.error(`Retenção máxima: ${MAX_TEMPERATURE_MONITOR_RETENTION_DAYS} dias.`);
+      return;
+    }
+
+    const cadenceChanged = dirty || String(n) !== String(savedMinutes);
+    const retentionChanged = retentionDirty || String(r) !== String(savedRetentionDays);
+
+    if (!cadenceChanged && !retentionChanged) {
+      toast.success('Nenhuma mudança para salvar.');
+      return;
+    }
+
     setSaving(true);
+    let cadenceSaved = false;
+    let retentionSaved = false;
     try {
-      await onSave.mutateAsync({
-        key: TEMPERATURE_MONITOR_INTERVAL_KEY,
-        value: String(n),
-        type: 'number',
-      });
-      setDirty(false);
+      if (cadenceChanged) {
+        await onSave.mutateAsync({
+          key: TEMPERATURE_MONITOR_INTERVAL_KEY,
+          value: String(n),
+          type: 'number',
+          silent: true,
+        });
+        cadenceSaved = true;
+        setDirty(false);
+      }
+      if (retentionChanged) {
+        await onSave.mutateAsync({
+          key: TEMPERATURE_MONITOR_RETENTION_DAYS_KEY,
+          value: String(r),
+          type: 'number',
+          silent: true,
+        });
+        retentionSaved = true;
+        setRetentionDirty(false);
+      }
+      const parts = [];
+      if (cadenceSaved) parts.push('frequência');
+      if (retentionSaved) parts.push('retenção do histórico');
+      toast.success(`Configuração salva: ${parts.join(' e ')}.`);
     } catch (e) {
-      // a mutation já dispara um toast de erro via onError
+      // The mutation already shows a toast.error via its onError, but if
+      // the cadence write succeeded and the retention write failed (or vice
+      // versa) we surface that explicitly so the admin knows the save was
+      // partial and can retry.
+      if (cadenceSaved && !retentionSaved && retentionChanged) {
+        toast.error('Frequência salva, mas não foi possível salvar a retenção. Tente novamente.');
+      } else if (retentionSaved && !cadenceSaved && cadenceChanged) {
+        toast.error('Retenção salva, mas não foi possível salvar a frequência. Tente novamente.');
+      }
     }
     setSaving(false);
   };
@@ -701,8 +784,8 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
         </CardTitle>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Define a cada quantos minutos o sistema avalia os leads em busca de quem virou frio
-          (e dispara os alertas para os vendedores). Mudanças passam a valer no próximo ciclo,
-          sem precisar reiniciar o servidor.
+          (e dispara os alertas para os vendedores) e por quantos dias o histórico das execuções
+          é mantido. Mudanças passam a valer no próximo ciclo, sem precisar reiniciar o servidor.
         </p>
       </CardHeader>
       <CardContent className="pt-5 space-y-4">
@@ -727,14 +810,46 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
               Padrão: {DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES} minutos.
             </p>
           </div>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950/40 p-3 text-xs text-gray-600 dark:text-gray-300 self-start">
-            <div className="font-medium text-gray-700 dark:text-gray-200 mb-1">
-              Pré-visualização
-            </div>
-            {previewMinutes
-              ? <>O monitor rodará <strong>{describeIntervalMinutes(previewMinutes)}</strong>.</>
-              : <>Informe um valor válido para ver a frequência aplicada.</>}
+          <div>
+            <Label className="text-xs text-gray-700 dark:text-gray-300">
+              Retenção do histórico (dias)
+            </Label>
+            <Input
+              type="number"
+              min={MIN_TEMPERATURE_MONITOR_RETENTION_DAYS}
+              max={MAX_TEMPERATURE_MONITOR_RETENTION_DAYS}
+              step="1"
+              value={retentionValue}
+              onChange={(e) => updateRetention(e.target.value)}
+              placeholder={`Ex.: ${DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS}`}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Permitido entre {MIN_TEMPERATURE_MONITOR_RETENTION_DAYS} e
+              {' '}{MAX_TEMPERATURE_MONITOR_RETENTION_DAYS} dias.
+              Padrão: {DEFAULT_TEMPERATURE_MONITOR_RETENTION_DAYS} dias.
+              Execuções mais antigas são removidas automaticamente.
+            </p>
           </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950/40 p-3 text-xs text-gray-600 dark:text-gray-300">
+          <div className="font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Pré-visualização
+          </div>
+          {previewMinutes
+            ? <>O monitor rodará <strong>{describeIntervalMinutes(previewMinutes)}</strong>.</>
+            : <>Informe uma frequência válida para ver a cadência aplicada.</>}
+          {(() => {
+            const r = Number(retentionValue);
+            const validR = Number.isFinite(r) && r > 0 && Math.floor(r) === r
+              && r >= MIN_TEMPERATURE_MONITOR_RETENTION_DAYS
+              && r <= MAX_TEMPERATURE_MONITOR_RETENTION_DAYS;
+            return validR ? (
+              <> Histórico mantido por <strong>{r === 1 ? '1 dia' : `${r} dias`}</strong>.</>
+            ) : (
+              <> Informe uma retenção válida para ver por quantos dias o histórico será mantido.</>
+            );
+          })()}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -752,12 +867,12 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
             ) : (
               <>
                 <Save className="w-4 h-4 mr-2" />
-                Salvar frequência
+                Salvar
               </>
             )}
           </Button>
           <Button variant="outline" onClick={handleReset} disabled={saving}>
-            Restaurar padrão
+            Restaurar padrões
           </Button>
           {isAdmin && (
             <Button
