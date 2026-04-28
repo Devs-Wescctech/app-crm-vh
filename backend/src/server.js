@@ -15,7 +15,11 @@ import { runAllAutomations } from './services/automationService.js';
 import { syncAllAgents } from './services/googleCalendarService.js';
 import { startOutboxWorker } from './workers/gcalOutboxWorker.js';
 import { createNotification } from './services/notificationService.js';
-import { runMonitorAndRecord, loadMonitorIntervalMinutes } from './services/leadTemperatureMonitor.js';
+import {
+  runMonitorAndRecord,
+  loadMonitorIntervalMinutes,
+  pruneOldMonitorRuns,
+} from './services/leadTemperatureMonitor.js';
 import { query as dbQuery } from './config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -207,6 +211,33 @@ initDatabase()
     }
     scheduleNextTemperatureCheck(true).catch((err) =>
       console.error('[Lead Temperature] Erro ao iniciar monitor:', err.message)
+    );
+
+    // Periodic cleanup of the monitor-run history. The per-insert prune was
+    // removed from runMonitorAndRecord because at chatty cadences (1 minute)
+    // it was both O(n) and fragile — a single failed prune would leave stale
+    // rows around forever. A time-based DELETE on a fixed cadence is cheap
+    // (uses idx_lead_temperature_monitor_runs_started_at) and self-healing:
+    // the next tick simply removes whatever the previous one missed.
+    const MONITOR_HISTORY_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+    async function runMonitorHistoryCleanup() {
+      try {
+        const { deleted, retentionDays } = await pruneOldMonitorRuns();
+        if (deleted > 0) {
+          console.log(
+            `[Lead Temperature] Histórico podado: ${deleted} registro(s) com mais de ${retentionDays} dia(s) removido(s).`
+          );
+        }
+      } catch (err) {
+        console.error('[Lead Temperature] Erro ao podar histórico do monitor:', err.message);
+      }
+    }
+    // Run once shortly after boot so a long-stopped instance starts catching
+    // up immediately instead of waiting a full hour.
+    setTimeout(runMonitorHistoryCleanup, 60 * 1000);
+    setInterval(runMonitorHistoryCleanup, MONITOR_HISTORY_CLEANUP_INTERVAL_MS);
+    console.log(
+      `[Lead Temperature] Limpeza do histórico agendada: a cada ${MONITOR_HISTORY_CLEANUP_INTERVAL_MS / 60000} minuto(s).`
     );
   })
   .catch((error) => {

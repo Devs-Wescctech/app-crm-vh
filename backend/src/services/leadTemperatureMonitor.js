@@ -54,6 +54,47 @@ export async function loadMonitorIntervalMinutes() {
   }
 }
 
+// Settings key admins use to control how long monitor-run summaries are kept
+// in `lead_temperature_monitor_runs`. Stored as a plain integer (days). See
+// loadMonitorRetentionDays for the accepted range and defaults.
+export const MONITOR_RETENTION_DAYS_KEY = 'lead_temperature_monitor_retention_days';
+
+// Default retention: 30 days. Even at the 1-minute cadence this keeps the
+// table at ~43k rows, well within what a single indexed DELETE can handle.
+export const DEFAULT_MONITOR_RETENTION_DAYS = 30;
+
+// Guardrails so a typo in Settings can't drop history within minutes or let
+// it grow unbounded. 1 day lower bound preserves at least a day of debugging
+// context; 365 day upper bound keeps the table from growing without limit.
+export const MIN_MONITOR_RETENTION_DAYS = 1;
+export const MAX_MONITOR_RETENTION_DAYS = 365;
+
+export function normalizeMonitorRetentionDays(value) {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_MONITOR_RETENTION_DAYS;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MONITOR_RETENTION_DAYS;
+  const rounded = Math.round(n);
+  if (rounded < MIN_MONITOR_RETENTION_DAYS) return MIN_MONITOR_RETENTION_DAYS;
+  if (rounded > MAX_MONITOR_RETENTION_DAYS) return MAX_MONITOR_RETENTION_DAYS;
+  return rounded;
+}
+
+export async function loadMonitorRetentionDays() {
+  try {
+    const result = await query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = $1 LIMIT 1`,
+      [MONITOR_RETENTION_DAYS_KEY]
+    );
+    if (result.rows.length === 0) return DEFAULT_MONITOR_RETENTION_DAYS;
+    return normalizeMonitorRetentionDays(result.rows[0].setting_value);
+  } catch (err) {
+    console.error('[Lead Temperature] Falha ao ler retenção do histórico:', err.message);
+    return DEFAULT_MONITOR_RETENTION_DAYS;
+  }
+}
+
 async function loadTemperatureRules() {
   const result = await query(
     `SELECT setting_value FROM system_settings WHERE setting_key = $1 LIMIT 1`,
@@ -314,12 +355,6 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
   return { checked: leads.length, coldNotified, hotNotified };
 }
 
-// Maximum number of monitor-run summaries to keep in the history table.
-// Older rows are pruned after each insert so the table stays small even when
-// the cadence is set to 1 minute (≈14k runs/day). The Settings UI only
-// surfaces the most recent ~10 entries, so a generous buffer is enough.
-export const MONITOR_RUN_HISTORY_LIMIT = 200;
-
 /**
  * Runs the cold-lead monitor and persists a small summary row so admins can
  * see (in Settings → Temperatura de Leads) when it last ran, what it did,
@@ -328,6 +363,11 @@ export const MONITOR_RUN_HISTORY_LIMIT = 200;
  *
  * Recording failures are swallowed: we never want a problem with the history
  * table to take down the actual monitor.
+ *
+ * History pruning is handled by the periodic `pruneOldMonitorRuns` job
+ * scheduled in server.js — keeping that out of the hot path means a chatty
+ * cadence (1-minute) doesn't pay an O(n) DELETE per insert and a temporary
+ * cleanup failure can't bleed into the monitor's success rate.
  */
 export async function runMonitorAndRecord({ now = new Date() } = {}) {
   const startedAt = now instanceof Date ? now : new Date();
@@ -366,16 +406,6 @@ export async function runMonitorAndRecord({ now = new Date() } = {}) {
         errorMessage,
       ]
     );
-    // Keep the history small without depending on a periodic cleanup job.
-    await query(
-      `DELETE FROM lead_temperature_monitor_runs
-       WHERE id IN (
-         SELECT id FROM lead_temperature_monitor_runs
-         ORDER BY started_at DESC
-         OFFSET $1
-       )`,
-      [MONITOR_RUN_HISTORY_LIMIT]
-    );
   } catch (recordErr) {
     console.error('[Lead Temperature] Falha ao registrar histórico do monitor:', recordErr.message);
   }
@@ -410,4 +440,38 @@ export async function listRecentMonitorRuns({ limit = 10 } = {}) {
     status: row.status,
     errorMessage: row.error_message,
   }));
+}
+
+/**
+ * Deletes monitor-run summaries older than the configured retention window.
+ *
+ * Uses a time-based predicate (`started_at < now() - interval`) backed by the
+ * `idx_lead_temperature_monitor_runs_started_at` index, so the cost is
+ * proportional to the rows actually being deleted — not to the table size.
+ * That makes it safe to run on a fixed cadence regardless of how chatty the
+ * monitor is.
+ *
+ * Resolution order for retention days (in days):
+ *   1. explicit `retentionDays` argument (used by tests / one-off jobs)
+ *   2. `system_settings.lead_temperature_monitor_retention_days`
+ *   3. DEFAULT_MONITOR_RETENTION_DAYS
+ *
+ * Returns `{ deleted, retentionDays }`. Errors are not swallowed here — the
+ * scheduler in server.js logs them so a recurring failure is visible.
+ */
+export async function pruneOldMonitorRuns({ retentionDays } = {}) {
+  const days =
+    retentionDays !== undefined
+      ? normalizeMonitorRetentionDays(retentionDays)
+      : await loadMonitorRetentionDays();
+  // Multiply a bound integer by `INTERVAL '1 day'` instead of interpolating
+  // the count into the INTERVAL literal. `days` is already clamped to
+  // [1, 365] by normalize, but a bind parameter keeps the query free of
+  // any dynamically-constructed SQL.
+  const result = await query(
+    `DELETE FROM lead_temperature_monitor_runs
+     WHERE started_at < NOW() - ($1::int * INTERVAL '1 day')`,
+    [days]
+  );
+  return { deleted: result.rowCount || 0, retentionDays: days };
 }
