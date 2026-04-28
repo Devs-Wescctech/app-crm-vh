@@ -211,8 +211,8 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.cnpj) {
-      toast.error('CNPJ é obrigatório');
+    if (!formData.razaoSocial?.trim()) {
+      toast.error('Razão Social é obrigatória');
       return;
     }
 
@@ -235,7 +235,7 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
       <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
         <Label className="text-blue-900 dark:text-blue-100 font-semibold flex items-center gap-2 mb-3">
           <Building2 className="w-5 h-5" />
-          CNPJ da Empresa *
+          CNPJ da Empresa <span className="text-xs font-normal text-blue-700 dark:text-blue-300">(opcional)</span>
         </Label>
         <div className="flex gap-2">
           <Input
@@ -603,7 +603,7 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
         )}
         <Button 
           type="submit" 
-          disabled={createLeadMutation.isPending || !formData.cnpj}
+          disabled={createLeadMutation.isPending || !formData.razaoSocial?.trim()}
           className="bg-blue-600 hover:bg-blue-700"
         >
           {createLeadMutation.isPending ? (
