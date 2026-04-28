@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer } from "lucide-react";
+import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer, History, RefreshCw, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -152,6 +152,7 @@ export default function Settings() {
           <TabsContent value="lead-temperature" className="space-y-6">
             <LeadTemperatureRulesEditor settings={settings} onSave={createOrUpdateSettingMutation} />
             <LeadTemperatureMonitorCadenceEditor settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={isAdmin} />
+            {isAdmin && <LeadTemperatureMonitorHistory />}
           </TabsContent>
         )}
 
@@ -787,6 +788,252 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false
             </div>
             <div className="mt-0.5">{lastRun.summary}</div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatRelativeTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const diffMs = Date.now() - d.getTime();
+  const diffSec = Math.round(diffMs / 1000);
+  if (diffSec < 0) return 'agora';
+  if (diffSec < 60) return diffSec === 1 ? 'há 1 segundo' : `há ${diffSec} segundos`;
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return diffMin === 1 ? 'há 1 minuto' : `há ${diffMin} minutos`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return diffH === 1 ? 'há 1 hora' : `há ${diffH} horas`;
+  const diffD = Math.round(diffH / 24);
+  return diffD === 1 ? 'há 1 dia' : `há ${diffD} dias`;
+}
+
+function formatAbsoluteTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(d);
+  } catch (e) {
+    return d.toISOString();
+  }
+}
+
+function formatDurationMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n < 1000) return `${Math.round(n)} ms`;
+  if (n < 60_000) return `${(n / 1000).toFixed(n < 10_000 ? 2 : 1)} s`;
+  const totalSec = Math.round(n / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function LeadTemperatureMonitorHistory() {
+  const { data, isFetching, isError, error, refetch, dataUpdatedAt } = useQuery({
+    queryKey: ['leadTemperatureMonitorRuns'],
+    queryFn: async () => {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/functions/lead-temperature/monitor-runs?limit=10', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `Falha ao carregar histórico (status ${res.status})`);
+      }
+      return res.json();
+    },
+    // Auto-refresh in the background so the panel reflects the live cadence
+    // without forcing the admin to hit "Atualizar" between page visits.
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const runs = Array.isArray(data?.runs) ? data.runs : [];
+  const lastRun = runs[0] || null;
+  const lastSuccess = runs.find((r) => r.status === 'success') || null;
+
+  return (
+    <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-gray-900 dark:text-gray-100 text-base flex items-center gap-2">
+              <History className="w-4 h-4" />
+              Últimas execuções do monitor
+            </CardTitle>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Confirme que a frequência configurada está sendo respeitada. Mostra
+              quando o monitor rodou pela última vez, quantos leads foram avaliados
+              e quantos alertas foram disparados.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="shrink-0"
+          >
+            {isFetching ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Atualizar
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-5 space-y-4">
+        {isError && (
+          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20 p-3 text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>Não foi possível carregar o histórico: {error?.message || 'erro desconhecido'}.</span>
+          </div>
+        )}
+
+        {!isError && runs.length === 0 && !isFetching && (
+          <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+            O monitor ainda não rodou desde a última inicialização do servidor.
+            A primeira execução acontece poucos minutos após o boot.
+          </div>
+        )}
+
+        {!isError && lastRun && (
+          <div
+            className={`rounded-xl border p-4 ${
+              lastRun.status === 'error'
+                ? 'border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20'
+                : 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20'
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              {lastRun.status === 'error' ? (
+                <Badge className="bg-red-600 hover:bg-red-600 text-white">
+                  <XCircle className="w-3 h-3 mr-1" />
+                  Falhou
+                </Badge>
+              ) : (
+                <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Sucesso
+                </Badge>
+              )}
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                Última execução {formatRelativeTime(lastRun.startedAt)}
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                ({formatAbsoluteTime(lastRun.startedAt)})
+              </span>
+            </div>
+            {lastRun.status === 'error' ? (
+              <div className="text-sm text-red-700 dark:text-red-300 break-words">
+                Erro: {lastRun.errorMessage || 'sem detalhes'}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                Avaliou <strong>{lastRun.leadsChecked}</strong>{' '}
+                {lastRun.leadsChecked === 1 ? 'lead' : 'leads'} em{' '}
+                <strong>{formatDurationMs(lastRun.durationMs)}</strong> e disparou{' '}
+                <strong>{lastRun.coldNotified}</strong> alerta(s) de frio e{' '}
+                <strong>{lastRun.hotNotified}</strong> aviso(s) de quente.
+              </div>
+            )}
+            {lastRun.status === 'error' && lastSuccess && lastSuccess !== lastRun && (
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                Última execução bem-sucedida: {formatRelativeTime(lastSuccess.startedAt)}
+                {' '}({formatAbsoluteTime(lastSuccess.startedAt)}).
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isError && runs.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-950/50 text-xs uppercase text-gray-500 dark:text-gray-400">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Quando</th>
+                  <th className="text-left font-medium px-3 py-2">Status</th>
+                  <th className="text-right font-medium px-3 py-2">Leads avaliados</th>
+                  <th className="text-right font-medium px-3 py-2">Alertas frios</th>
+                  <th className="text-right font-medium px-3 py-2">Avisos quentes</th>
+                  <th className="text-right font-medium px-3 py-2">Duração</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                {runs.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={
+                      r.status === 'error'
+                        ? 'bg-red-50/30 dark:bg-red-950/10'
+                        : 'bg-white dark:bg-gray-900'
+                    }
+                  >
+                    <td className="px-3 py-2 align-top">
+                      <div className="text-gray-800 dark:text-gray-200">
+                        {formatRelativeTime(r.startedAt)}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {formatAbsoluteTime(r.startedAt)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      {r.status === 'error' ? (
+                        <Badge className="bg-red-600 hover:bg-red-600 text-white">
+                          <XCircle className="w-3 h-3 mr-1" />
+                          Falhou
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300">
+                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                          Sucesso
+                        </Badge>
+                      )}
+                      {r.status === 'error' && r.errorMessage && (
+                        <div
+                          className="text-xs text-red-600 dark:text-red-300 mt-1 max-w-xs break-words"
+                          title={r.errorMessage}
+                        >
+                          {r.errorMessage}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      {r.leadsChecked}
+                    </td>
+                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      {r.coldNotified}
+                    </td>
+                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      {r.hotNotified}
+                    </td>
+                    <td className="px-3 py-2 align-top text-right tabular-nums text-gray-700 dark:text-gray-300">
+                      {formatDurationMs(r.durationMs)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {dataUpdatedAt > 0 && !isError && (
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Painel atualizado {formatRelativeTime(new Date(dataUpdatedAt).toISOString())}.
+          </p>
         )}
       </CardContent>
     </Card>

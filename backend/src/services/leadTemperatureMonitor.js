@@ -313,3 +313,101 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
 
   return { checked: leads.length, coldNotified, hotNotified };
 }
+
+// Maximum number of monitor-run summaries to keep in the history table.
+// Older rows are pruned after each insert so the table stays small even when
+// the cadence is set to 1 minute (≈14k runs/day). The Settings UI only
+// surfaces the most recent ~10 entries, so a generous buffer is enough.
+export const MONITOR_RUN_HISTORY_LIMIT = 200;
+
+/**
+ * Runs the cold-lead monitor and persists a small summary row so admins can
+ * see (in Settings → Temperatura de Leads) when it last ran, what it did,
+ * and whether it failed. Always returns the same shape as
+ * checkLeadTemperatures so callers can keep their existing logging.
+ *
+ * Recording failures are swallowed: we never want a problem with the history
+ * table to take down the actual monitor.
+ */
+export async function runMonitorAndRecord({ now = new Date() } = {}) {
+  const startedAt = now instanceof Date ? now : new Date();
+  const startMs = Date.now();
+  let result = { checked: 0, coldNotified: 0, hotNotified: 0 };
+  let status = 'success';
+  let errorMessage = null;
+  let thrown = null;
+
+  try {
+    result = await checkLeadTemperatures({ now: startedAt });
+  } catch (err) {
+    status = 'error';
+    errorMessage = err && err.message ? String(err.message).slice(0, 1000) : String(err).slice(0, 1000);
+    thrown = err;
+  }
+
+  const finishedAt = new Date();
+  const durationMs = Date.now() - startMs;
+
+  try {
+    await query(
+      `INSERT INTO lead_temperature_monitor_runs
+         (started_at, finished_at, duration_ms,
+          leads_checked, cold_notified, hot_notified,
+          status, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        startedAt.toISOString(),
+        finishedAt.toISOString(),
+        durationMs,
+        result.checked || 0,
+        result.coldNotified || 0,
+        result.hotNotified || 0,
+        status,
+        errorMessage,
+      ]
+    );
+    // Keep the history small without depending on a periodic cleanup job.
+    await query(
+      `DELETE FROM lead_temperature_monitor_runs
+       WHERE id IN (
+         SELECT id FROM lead_temperature_monitor_runs
+         ORDER BY started_at DESC
+         OFFSET $1
+       )`,
+      [MONITOR_RUN_HISTORY_LIMIT]
+    );
+  } catch (recordErr) {
+    console.error('[Lead Temperature] Falha ao registrar histórico do monitor:', recordErr.message);
+  }
+
+  if (thrown) throw thrown;
+  return result;
+}
+
+/**
+ * Returns the most recent monitor-run summaries (newest first), capped at
+ * `limit`. Used by the admin Settings panel.
+ */
+export async function listRecentMonitorRuns({ limit = 10 } = {}) {
+  const safeLimit = Math.max(1, Math.min(100, Math.round(Number(limit) || 10)));
+  const result = await query(
+    `SELECT id, started_at, finished_at, duration_ms,
+            leads_checked, cold_notified, hot_notified,
+            status, error_message
+     FROM lead_temperature_monitor_runs
+     ORDER BY started_at DESC
+     LIMIT $1`,
+    [safeLimit]
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    durationMs: row.duration_ms,
+    leadsChecked: row.leads_checked,
+    coldNotified: row.cold_notified,
+    hotNotified: row.hot_notified,
+    status: row.status,
+    errorMessage: row.error_message,
+  }));
+}

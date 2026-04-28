@@ -41,6 +41,7 @@ import {
   getMaskedConfig as getGCalMaskedConfig,
   saveConfig as saveGCalConfig,
 } from '../services/googleCalendarConfigService.js';
+import { listRecentMonitorRuns } from '../services/leadTemperatureMonitor.js';
 
 const router = Router();
 
@@ -4858,6 +4859,25 @@ router.post('/google-calendar/disconnect', authMiddleware, loadAgentMiddleware, 
     res.json({ success: true });
   } catch (error) {
     console.error('[Google Calendar] Disconnect error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin-only: returns recent cold-lead monitor run summaries so the Settings
+// page can show "the monitor ran X minutes ago, evaluated N leads, sent K
+// alerts" and a short history. Mirrors the agentType/role check used by the
+// other admin endpoints in this file.
+router.get('/lead-temperature/monitor-runs', authMiddleware, loadAgentMiddleware, async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === 'admin' || req.agent?.agentType === 'admin';
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Apenas administradores podem ver o histórico do monitor.' });
+    }
+    const limit = Number(req.query?.limit) || 10;
+    const runs = await listRecentMonitorRuns({ limit });
+    res.json({ runs });
+  } catch (error) {
+    console.error('[Lead Temperature] Histórico error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

@@ -15,7 +15,7 @@ import { runAllAutomations } from './services/automationService.js';
 import { syncAllAgents } from './services/googleCalendarService.js';
 import { startOutboxWorker } from './workers/gcalOutboxWorker.js';
 import { createNotification } from './services/notificationService.js';
-import { checkLeadTemperatures, loadMonitorIntervalMinutes } from './services/leadTemperatureMonitor.js';
+import { runMonitorAndRecord, loadMonitorIntervalMinutes } from './services/leadTemperatureMonitor.js';
 import { query as dbQuery } from './config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -186,7 +186,7 @@ initDatabase()
       const delayMs = initial ? 60 * 1000 : minutes * 60 * 1000;
       setTimeout(async () => {
         try {
-          const { checked, coldNotified, hotNotified } = await checkLeadTemperatures();
+          const { checked, coldNotified, hotNotified } = await runMonitorAndRecord();
           if (initial) {
             console.log(`[Lead Temperature] Inicial: ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
           } else if (coldNotified > 0 || hotNotified > 0) {

@@ -1454,6 +1454,28 @@ CREATE INDEX IF NOT EXISTS idx_gcal_event_outbox_activity
     ON gcal_event_outbox (activity_table, activity_id);
 
 -- =====================
+-- LEAD TEMPERATURE MONITOR RUN HISTORY
+-- =====================
+-- Records each invocation of the cold-lead monitor so admins can confirm
+-- the cadence change in Settings is taking effect (last run, leads checked,
+-- alerts dispatched) and distinguish failures from quiet successes.
+CREATE TABLE IF NOT EXISTS lead_temperature_monitor_runs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    leads_checked INTEGER NOT NULL DEFAULT 0,
+    cold_notified INTEGER NOT NULL DEFAULT 0,
+    hot_notified INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('success','error')),
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_temperature_monitor_runs_started_at
+    ON lead_temperature_monitor_runs (started_at DESC);
+
+-- =====================
 -- COORDINATOR ROLE MIGRATION
 -- =====================
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS coordinator_id UUID;
