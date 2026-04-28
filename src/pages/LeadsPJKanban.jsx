@@ -38,7 +38,8 @@ import {
   Calendar,
   Trophy,
   Eye,
-  EyeOff
+  EyeOff,
+  Snowflake
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -48,7 +49,7 @@ import {
 } from "@/components/ui/popover";
 import QuickLeadPJForm from "../components/sales/QuickLeadPJForm";
 import { createPageUrl } from "@/utils";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
 import { computeLeadTemperature, getTemperatureRulesFromSettings, TEMPERATURE_META } from "@/components/utils/temperature";
@@ -429,21 +430,46 @@ export default function LeadsPJKanban() {
   );
   const [viewMode, setViewMode] = useState('kanban');
   const DEFAULT_FILTERS = { search: '', agent: 'all', team: 'all', porte: 'all', temperature: 'all', dateFrom: '', dateTo: '' };
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState(() => {
     const saved = localStorage.getItem('leadsPJKanbanFilters');
+    let initial = { ...DEFAULT_FILTERS };
     if (saved) {
       try {
-        return { ...DEFAULT_FILTERS, ...JSON.parse(saved) };
+        initial = { ...DEFAULT_FILTERS, ...JSON.parse(saved) };
       } catch (e) {
-        return { ...DEFAULT_FILTERS };
+        initial = { ...DEFAULT_FILTERS };
       }
     }
-    return { ...DEFAULT_FILTERS };
+    const tempParam = searchParams.get('temperature');
+    if (tempParam && ['hot', 'warm', 'cold', 'all'].includes(tempParam)) {
+      initial = { ...initial, temperature: tempParam };
+    }
+    return initial;
   });
+
+  // Once the URL param has been applied to local filter state, drop it from
+  // the URL so the filter behaves like any other (toggleable, clearable).
+  useEffect(() => {
+    if (searchParams.get('temperature')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('temperature');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('leadsPJKanbanFilters', JSON.stringify(filters));
   }, [filters]);
+
+  const isColdQuickFilterActive = filters.temperature === 'cold';
+  const toggleColdQuickFilter = () => {
+    setFilters(prev => ({
+      ...prev,
+      temperature: prev.temperature === 'cold' ? 'all' : 'cold',
+    }));
+  };
 
   const clearFilters = () => {
     setFilters({ ...DEFAULT_FILTERS });
@@ -638,6 +664,17 @@ export default function LeadsPJKanban() {
     }
     return map;
   }, [leadsPJ, allActivitiesPJ, temperatureRules]);
+
+  // Count of currently-cold leads (excluding finalized leads, which are already
+  // filtered out of `leadsPJ`). Used to power the "Frios" quick-filter chip.
+  const coldLeadsCount = useMemo(() => {
+    let count = 0;
+    for (const lead of leadsPJ) {
+      const t = temperatureByLead.get(String(lead.id));
+      if (t && t.key === 'cold') count++;
+    }
+    return count;
+  }, [leadsPJ, temperatureByLead]);
 
   const leadsQueryKey = ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id];
   
@@ -1120,6 +1157,27 @@ export default function LeadsPJKanban() {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="glass"
+              onClick={toggleColdQuickFilter}
+              size="sm"
+              className={`flex-1 sm:flex-none ${
+                isColdQuickFilterActive
+                  ? 'ring-2 ring-blue-500/60 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                  : ''
+              }`}
+              title={isColdQuickFilterActive ? 'Mostrar leads de todas as temperaturas' : 'Filtrar somente leads frios'}
+              aria-pressed={isColdQuickFilterActive}
+            >
+              <Snowflake className={`w-4 h-4 sm:mr-2 ${isColdQuickFilterActive ? 'text-blue-600 dark:text-blue-400' : ''}`} />
+              <span className="hidden sm:inline">Frios</span>
+              <Badge
+                variant={isColdQuickFilterActive ? 'info' : 'secondary'}
+                className="ml-2"
+              >
+                {coldLeadsCount}
+              </Badge>
+            </Button>
+            <Button
+              variant="glass"
               onClick={() => setShowClosedLeads(prev => !prev)}
               className={`flex-1 sm:flex-none ${showClosedLeads ? 'ring-2 ring-emerald-500/50' : ''}`}
               size="sm"
@@ -1289,6 +1347,38 @@ export default function LeadsPJKanban() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {isColdQuickFilterActive && filteredLeads.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <Card className="border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-950/40">
+              <CardContent className="py-8 text-center">
+                <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-white/70 dark:bg-blue-900/40 flex items-center justify-center shadow-sm">
+                  <Snowflake className="w-7 h-7 text-blue-500 dark:text-blue-300" />
+                </div>
+                <h3 className="text-base font-semibold text-blue-900 dark:text-blue-100">
+                  Nenhum lead frio por aqui — bom trabalho!
+                </h3>
+                <p className="text-sm text-blue-800/80 dark:text-blue-200/80 mt-1 max-w-md mx-auto">
+                  Os seus leads visíveis estão dentro do tempo de contato configurado.
+                  Quando algum esfriar, ele aparece aqui para você retomar o atendimento.
+                </p>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={toggleColdQuickFilter}
+                    className="border-blue-300 dark:border-blue-700"
+                  >
+                    Ver todos os leads
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         <motion.div
           className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-4"

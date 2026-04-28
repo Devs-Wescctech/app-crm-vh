@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1895,6 +1895,18 @@ export default function LeadPJDetail() {
                       <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3">
                         Ajuste essas regras em Configurações → Temperatura de leads.
                       </p>
+                    </div>
+                  )}
+
+                  {temperatureComputed?.key === 'cold' && (
+                    <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <Link
+                        to={`${createPageUrl('LeadsPJKanban')}?temperature=cold`}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100"
+                      >
+                        <ListTodo className="w-4 h-4" />
+                        Ver todos os meus leads frios
+                      </Link>
                     </div>
                   )}
                 </CardContent>
