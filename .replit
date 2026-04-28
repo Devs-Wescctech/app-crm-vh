@@ -79,3 +79,7 @@ COMMISSION_REPORT_RECIPIENTS = "tais.dequi@wescctech.com.br"
 [userenv.development]
 GCAL_TOKEN_ENC_KEY = "CsdPtPQ6j3mSeAMyADo/FW5FdPzgsht+yoHE8zUVLc4="
 GCAL_REDIRECT_URI = "https://c3924b13-7d9b-4c71-91ee-80c0159c6078-00-173j3vp3rbr6l.spock.replit.dev/api/functions/google-calendar/callback"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
