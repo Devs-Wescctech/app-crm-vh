@@ -27,6 +27,10 @@ import MetricsHelpDialog from "@/components/dashboard/MetricsHelpDialog";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions.jsx";
 import { isWithinInterval, parseISO, startOfDay, endOfDay } from "date-fns";
 import { LEAD_PJ_STAGES, isActiveStage, isWonStage, isLostStage } from "@/constants/stages";
+import {
+  buildAgentChangesByLead,
+  getCommissionOwnerForLead,
+} from "@/utils/leadOwnership";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -102,6 +106,17 @@ export default function SalesPJDashboard() {
     queryFn: () => base44.entities.ActivityPJ.list('-createdDate', 50),
     initialData: [],
   });
+
+  const { data: agentChangeActivities = [] } = useQuery({
+    queryKey: ['salesPJDashboardAgentChanges'],
+    queryFn: () => base44.entities.ActivityPJ.list('-created_at', 10000),
+    enabled: !!user,
+  });
+
+  const changesByLead = useMemo(
+    () => buildAgentChangesByLead(agentChangeActivities),
+    [agentChangeActivities],
+  );
 
   const visibleAgents = useMemo(() => {
     return getVisibleAgentsForFilter(currentAgent, agents, teams);
@@ -185,6 +200,16 @@ export default function SalesPJDashboard() {
   const ticketMedio = vendas > 0 ? (receitaTotal / vendas).toFixed(2) : 0;
   const atividadesPendentes = activities.filter(a => !a.completed && a.type === 'task').length;
 
+  const wonLeadsWithCommission = useMemo(() => {
+    return leads
+      .filter(l => l.stage === 'fechado_ganho')
+      .map(l => ({
+        ...l,
+        commissionAgentId:
+          getCommissionOwnerForLead(l, changesByLead) || l.agentId || l.agent_id || null,
+      }));
+  }, [leads, changesByLead]);
+
   const topAgents = visibleAgents
     .filter(a => {
       const at = a.agentType || a.agent_type;
@@ -192,7 +217,9 @@ export default function SalesPJDashboard() {
     })
     .map(agent => {
       const agentLeads = leads.filter(l => (l.agentId || l.agent_id) === agent.id);
-      const agentVendas = agentLeads.filter(l => l.stage === 'fechado_ganho').length;
+      const agentVendas = wonLeadsWithCommission.filter(
+        l => String(l.commissionAgentId || '') === String(agent.id),
+      ).length;
       return { ...agent, vendas: agentVendas, total: agentLeads.length };
     })
     .sort((a, b) => b.vendas - a.vendas)

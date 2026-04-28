@@ -21,6 +21,10 @@ import {
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from "date-fns";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
+import {
+  buildAgentChangesByLead,
+  getCommissionOwnerForLead,
+} from "@/utils/leadOwnership";
 
 export default function SalesPJAgentsDashboard() {
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -62,6 +66,17 @@ export default function SalesPJAgentsDashboard() {
     enabled: canFetchData,
   });
 
+  const { data: agentChangeActivities = [] } = useQuery({
+    queryKey: ['salesPJDashboardAgentChanges'],
+    queryFn: () => base44.entities.ActivityPJ.list('-created_at', 10000),
+    enabled: canFetchData,
+  });
+
+  const changesByLead = useMemo(
+    () => buildAgentChangesByLead(agentChangeActivities),
+    [agentChangeActivities],
+  );
+
   const canSeeAllAgents = isAdmin;
   const visibleAgentIds = useMemo(() => getVisibleAgentIds(currentAgent, agents, teams), [currentAgent, agents, teams]);
   const isLoading = agentsLoading || teamsLoading || leadsLoading;
@@ -95,6 +110,15 @@ export default function SalesPJAgentsDashboard() {
     });
   }, [leads, dateRange]);
 
+  const wonLeadsWithCommission = useMemo(() => {
+    return filteredLeadsByDate
+      .filter(l => l.stage === 'fechado_ganho')
+      .map(l => ({
+        ...l,
+        commissionAgentId: getCommissionOwnerForLead(l, changesByLead) || l.agentId || l.agent_id || null,
+      }));
+  }, [filteredLeadsByDate, changesByLead]);
+
   const agentStats = useMemo(() => {
     return agents
       .filter(agent => {
@@ -109,15 +133,22 @@ export default function SalesPJAgentsDashboard() {
         const novos = agentLeads.filter(l => l.stage === 'novo').length;
         const qualificados = agentLeads.filter(l => l.stage === 'qualificado').length;
         const propostasEnviadas = agentLeads.filter(l => l.stage === 'proposta_enviada').length;
-        const vendas = agentLeads.filter(l => l.stage === 'fechado_ganho').length;
         const perdidos = agentLeads.filter(l => l.stage === 'fechado_perdido').length;
-        const taxaConversao = totalLeads > 0 ? ((vendas / totalLeads) * 100) : 0;
         const getLeadValue = (l) => parseFloat(l.value) || parseFloat(l.monthlyValue) || parseFloat(l.monthly_value) || parseFloat(l.monthlyRevenue) || parseFloat(l.monthly_revenue) || 0;
-        const receita = agentLeads
-          .filter(l => l.stage === 'fechado_ganho')
-          .reduce((sum, l) => sum + getLeadValue(l), 0);
+
+        const wonForAgent = wonLeadsWithCommission.filter(
+          (l) => String(l.commissionAgentId || '') === String(agent.id),
+        );
+        const vendas = wonForAgent.length;
+        const receita = wonForAgent.reduce((sum, l) => sum + getLeadValue(l), 0);
         const ticketMedio = vendas > 0 ? (receita / vendas) : 0;
-        const leadsAtivos = agentLeads.filter(l => 
+
+        const denominador = totalLeads + wonForAgent.filter(
+          (l) => String(l.agentId || l.agent_id || '') !== String(agent.id),
+        ).length;
+        const taxaConversao = denominador > 0 ? ((vendas / denominador) * 100) : 0;
+
+        const leadsAtivos = agentLeads.filter(l =>
           !l.concluded && !l.lost && l.stage !== 'fechado_ganho' && l.stage !== 'fechado_perdido'
         ).length;
 
@@ -135,7 +166,7 @@ export default function SalesPJAgentsDashboard() {
           ticketMedio,
         };
       });
-  }, [agents, filteredLeadsByDate, canSeeAllAgents, currentAgent, selectedTeam]);
+  }, [agents, filteredLeadsByDate, wonLeadsWithCommission, canSeeAllAgents, visibleAgentIds, selectedTeam]);
 
   const sortedAgents = useMemo(() => {
     return [...agentStats].sort((a, b) => {

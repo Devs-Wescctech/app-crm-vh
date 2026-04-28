@@ -29,6 +29,10 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions.jsx";
 import DashboardFilters from "@/components/dashboard/DashboardFilters";
+import {
+  buildAgentChangesByLead,
+  getCommissionOwnerForLead,
+} from "@/utils/leadOwnership";
 
 const createPageUrl = (pageName) => `/${pageName}`;
 
@@ -69,16 +73,50 @@ export default function SalesPJWonReport() {
     queryKey: ['leads-pj-won-report', getDataVisibilityKey(user, currentAgent), allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate', 10000);
-      const wonLeads = allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
-
-      if (isAdmin) return wonLeads;
-      if (!currentAgent) return [];
-
-      const visibleIds = getVisibleAgentIds(currentAgent, allAgents, teams);
-      return wonLeads.filter(l => visibleIds.includes(l.agentId || l.agent_id));
+      return allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
     },
     enabled: !!user && hasPermission && allAgents.length > 0,
   });
+
+  const { data: agentChangeActivities = [] } = useQuery({
+    queryKey: ['leads-pj-won-report-agent-changes'],
+    queryFn: () => base44.entities.ActivityPJ.list('-created_at', 10000),
+    enabled: !!user && hasPermission,
+  });
+
+  const changesByLead = useMemo(
+    () => buildAgentChangesByLead(agentChangeActivities),
+    [agentChangeActivities],
+  );
+
+  const visibleAgentIds = useMemo(() => {
+    if (isAdmin) return null;
+    if (!currentAgent) return [];
+    return getVisibleAgentIds(currentAgent, allAgents, teams).map(String);
+  }, [isAdmin, currentAgent, allAgents, teams]);
+
+  const leadsWithCommissionOwner = useMemo(() => {
+    return leadsPJ
+      .map((lead) => {
+        const commissionAgentId = getCommissionOwnerForLead(lead, changesByLead) || null;
+        const currentOwnerId = lead.agentId || lead.agent_id || null;
+        const ownerChanged =
+          commissionAgentId &&
+          currentOwnerId &&
+          String(commissionAgentId) !== String(currentOwnerId);
+        return { ...lead, commissionAgentId, ownerChanged };
+      })
+      .filter((lead) => {
+        if (visibleAgentIds === null) return true;
+        if (visibleAgentIds.length === 0) return false;
+        const currentOwnerId = lead.agentId || lead.agent_id || null;
+        const commissionAgentId = lead.commissionAgentId || null;
+        return (
+          (currentOwnerId && visibleAgentIds.includes(String(currentOwnerId))) ||
+          (commissionAgentId && visibleAgentIds.includes(String(commissionAgentId)))
+        );
+      });
+  }, [leadsPJ, changesByLead, visibleAgentIds]);
 
   const agentMap = useMemo(() => {
     const map = {};
@@ -94,15 +132,15 @@ export default function SalesPJWonReport() {
 
   const sources = useMemo(() => {
     const s = new Set();
-    leadsPJ.forEach(l => { if (l.source) s.add(l.source); });
+    leadsWithCommissionOwner.forEach(l => { if (l.source) s.add(l.source); });
     return [...s].sort();
-  }, [leadsPJ]);
+  }, [leadsWithCommissionOwner]);
 
   const segments = useMemo(() => {
     const s = new Set();
-    leadsPJ.forEach(l => { if (l.segment) s.add(l.segment); });
+    leadsWithCommissionOwner.forEach(l => { if (l.segment) s.add(l.segment); });
     return [...s].sort();
-  }, [leadsPJ]);
+  }, [leadsWithCommissionOwner]);
 
   const visibleAgents = useMemo(() => {
     return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
@@ -118,7 +156,7 @@ export default function SalesPJWonReport() {
   }, [visibleAgents, selectedTeam]);
 
   const filteredLeads = useMemo(() => {
-    return leadsPJ.filter(lead => {
+    return leadsWithCommissionOwner.filter(lead => {
       if (searchText) {
         const s = searchText.toLowerCase();
         if (
@@ -147,15 +185,16 @@ export default function SalesPJWonReport() {
         if (d > end) return false;
       }
 
+      const commissionAgentId =
+        lead.commissionAgentId || lead.agentId || lead.agent_id || null;
+
       if (selectedAgent) {
-        const agentId = lead.agentId || lead.agent_id;
-        if (agentId !== selectedAgent) return false;
+        if (String(commissionAgentId || "") !== String(selectedAgent)) return false;
       }
 
       if (selectedTeam) {
         const teamAgentIds = displayAgents.map(a => String(a.id));
-        const leadAgentId = String(lead.agentId || lead.agent_id);
-        if (!teamAgentIds.includes(leadAgentId)) return false;
+        if (!teamAgentIds.includes(String(commissionAgentId || ""))) return false;
       }
 
       if (selectedSource && lead.source !== selectedSource) return false;
@@ -163,7 +202,7 @@ export default function SalesPJWonReport() {
 
       return true;
     });
-  }, [leadsPJ, searchText, dateRange, selectedAgent, selectedTeam, selectedSource, selectedSegment, displayAgents]);
+  }, [leadsWithCommissionOwner, searchText, dateRange, selectedAgent, selectedTeam, selectedSource, selectedSegment, displayAgents]);
 
   const getLeadValue = (l) => parseFloat(l.value) || parseFloat(l.monthlyValue) || parseFloat(l.monthly_value) || 0;
   const totalRegistros = filteredLeads.length;
@@ -194,9 +233,13 @@ export default function SalesPJWonReport() {
       [`Período: ${periodLabel}`],
       [`Total: ${totalRegistros} | Valor Total: R$ ${(valorTotal || 0).toFixed(2)} | Ticket Médio: R$ ${(ticketMedio || 0).toFixed(2)}`],
       [''],
-      ['Razão Social', 'Nome Fantasia', 'CNPJ', 'Contato', 'Telefone', 'Segmento', 'Valor', 'Agente', 'Dt. Criação', 'Dt. Conversão'],
+      ['Razão Social', 'Nome Fantasia', 'CNPJ', 'Contato', 'Telefone', 'Segmento', 'Valor', 'Agente (Comissão)', 'Agente Atual', 'Dt. Criação', 'Dt. Conversão'],
       ...filteredLeads.map(lead => {
-        const agent = agentMap[lead.agentId || lead.agent_id];
+        const commissionAgentId =
+          lead.commissionAgentId || lead.agentId || lead.agent_id;
+        const currentAgentId = lead.agentId || lead.agent_id;
+        const commissionAgent = agentMap[commissionAgentId];
+        const currentAgentRow = agentMap[currentAgentId];
         const convertedDate = lead.convertedAt || lead.converted_at;
         return [
           lead.razaoSocial || lead.razao_social || '',
@@ -206,7 +249,8 @@ export default function SalesPJWonReport() {
           lead.contactPhone || lead.contact_phone || '',
           lead.segment || '',
           `R$ ${(parseFloat(lead.value) || parseFloat(lead.monthlyValue) || parseFloat(lead.monthly_value) || 0).toFixed(2)}`,
-          agent?.name || '',
+          commissionAgent?.name || '',
+          currentAgentRow?.name || '',
           lead.createdAt ? format(new Date(lead.createdAt), 'dd/MM/yyyy', { locale: ptBR }) : '',
           convertedDate ? format(new Date(convertedDate), 'dd/MM/yyyy', { locale: ptBR }) : '',
         ];
@@ -380,7 +424,7 @@ export default function SalesPJWonReport() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Telefone</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Segmento</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Valor</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Agente</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Agente (Comissão)</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Dt. Criação</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Dt. Conversão</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ações</th>
@@ -401,7 +445,11 @@ export default function SalesPJWonReport() {
                   </tr>
                 ) : (
                   paginatedLeads.map(lead => {
-                    const agent = agentMap[lead.agentId || lead.agent_id];
+                    const commissionAgentId =
+                      lead.commissionAgentId || lead.agentId || lead.agent_id;
+                    const currentAgentId = lead.agentId || lead.agent_id;
+                    const commissionAgent = agentMap[commissionAgentId];
+                    const currentAgentRow = agentMap[currentAgentId];
                     const convertedDate = lead.convertedAt || lead.converted_at;
                     return (
                       <tr key={lead.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
@@ -418,7 +466,19 @@ export default function SalesPJWonReport() {
                         <td className="px-4 py-3 whitespace-nowrap text-right font-semibold text-emerald-600 dark:text-emerald-400">
                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(lead.value) || parseFloat(lead.monthlyValue) || parseFloat(lead.monthly_value) || 0)}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-gray-700 dark:text-gray-300">{agent?.name || '-'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                          <div className="flex flex-col gap-0.5">
+                            <span>{commissionAgent?.name || '-'}</span>
+                            {lead.ownerChanged && (
+                              <span
+                                className="text-[10px] text-amber-700 dark:text-amber-400"
+                                title={`Vendedor atual: ${currentAgentRow?.name || 'desconhecido'}`}
+                              >
+                                Reatribuído (atual: {currentAgentRow?.name || '—'})
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap text-center text-gray-600 dark:text-gray-400">
                           {lead.createdAt ? format(new Date(lead.createdAt), 'dd/MM/yy', { locale: ptBR }) : '-'}
                         </td>
