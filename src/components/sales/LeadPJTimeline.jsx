@@ -81,6 +81,14 @@ const getActivityConfig = (type) => {
       border: "border-indigo-200 dark:border-indigo-800",
       gradient: "from-indigo-500 to-purple-500"
     },
+    agent_change: {
+      icon: User,
+      label: "Reatribuicao de agente",
+      bg: "bg-amber-100 dark:bg-amber-900/50",
+      text: "text-amber-700 dark:text-amber-300",
+      border: "border-amber-200 dark:border-amber-800",
+      gradient: "from-amber-500 to-orange-500"
+    },
     task: {
       icon: CheckCircle,
       label: "Tarefa",

@@ -1293,6 +1293,28 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
     if (!oldLead) {
       return res.status(404).json({ message: 'Lead PJ not found' });
     }
+
+    // Reatribuição: se o agente responsável está mudando, somente admin/coordenador
+    // (e nunca o próprio vendedor) pode efetuar a troca.
+    const isAgentReassignment =
+      Object.prototype.hasOwnProperty.call(data, 'agent_id') &&
+      String(data.agent_id ?? '') !== String(oldLead.agent_id ?? '');
+
+    let actingAgent = null;
+    if (isAgentReassignment) {
+      const meRes = await query(
+        'SELECT id, name, email, agent_type FROM agents WHERE id = $1',
+        [req.user.id]
+      );
+      actingAgent = meRes.rows[0];
+      const actingType = actingAgent?.agent_type;
+      const canReassign = actingType === 'admin' || actingType === 'coordinator';
+      if (!canReassign) {
+        return res.status(403).json({
+          message: 'Apenas admin ou coordenador podem reatribuir o agente responsável deste lead.',
+        });
+      }
+    }
     
     const filteredData = await filterValidColumns('leads_pj', data);
     delete filteredData.id;
@@ -1329,8 +1351,37 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
     const result = await query(sql, values);
     const lead = result.rows[0];
     
-    if (data.agent_id && data.agent_id !== oldLead.agent_id) {
-      await notifyLeadPJAssigned(lead, data.agent_id);
+    if (isAgentReassignment) {
+      try {
+        const agentLookup = await query(
+          'SELECT id, name FROM agents WHERE id = ANY($1::uuid[])',
+          [[oldLead.agent_id, lead.agent_id].filter(Boolean)]
+        );
+        const nameById = new Map(agentLookup.rows.map(a => [String(a.id), a.name]));
+        const fromName = oldLead.agent_id ? (nameById.get(String(oldLead.agent_id)) || 'Sem agente') : 'Sem agente';
+        const toName = lead.agent_id ? (nameById.get(String(lead.agent_id)) || 'Agente removido') : 'Sem agente';
+        const actorName = actingAgent?.name || actingAgent?.email || 'Sistema';
+
+        await query(
+          `INSERT INTO activities_pj (lead_id, type, title, description, created_by, assigned_to, completed)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            lead.id,
+            'agent_change',
+            'Agente responsável alterado',
+            `${actorName} reatribuiu o lead de "${fromName}" para "${toName}".`,
+            actingAgent?.id || null,
+            lead.agent_id ? String(lead.agent_id) : null,
+            true,
+          ]
+        );
+      } catch (logErr) {
+        console.error('[leads-pj] Falha ao registrar atividade de reatribuição:', logErr.message);
+      }
+
+      if (lead.agent_id) {
+        await notifyLeadPJAssigned(lead, lead.agent_id);
+      }
     }
     
     res.json(convertKeysToCamel(lead));

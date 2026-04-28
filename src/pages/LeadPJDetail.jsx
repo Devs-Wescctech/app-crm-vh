@@ -123,6 +123,7 @@ export default function LeadPJDetail() {
   const fileInputRef = useRef(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+  const [reassignAgentId, setReassignAgentId] = useState("");
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -337,6 +338,25 @@ export default function LeadPJDetail() {
       setHasChanges(false);
     },
   });
+
+  const reassignAgentMutation = useMutation({
+    mutationFn: (newAgentId) => base44.entities.LeadPJ.update(leadId, { agentId: newAgentId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leadPJ', leadId] });
+      queryClient.invalidateQueries({ queryKey: ['leadsPJ'] });
+      queryClient.invalidateQueries({ queryKey: ['activitiesPJ', leadId] });
+      setReassignAgentId("");
+      toast.success('Agente responsável atualizado!');
+    },
+    onError: (err) => {
+      toast.error(err?.message || 'Não foi possível reatribuir o agente.');
+    },
+  });
+
+  const handleReassignAgent = () => {
+    if (!reassignAgentId) return;
+    reassignAgentMutation.mutate(reassignAgentId);
+  };
 
   const createActivityMutation = useMutation({
     mutationFn: (data) => base44.entities.ActivityPJ.create(data),
@@ -1535,58 +1555,111 @@ export default function LeadPJDetail() {
           {/* COLUNA DIREITA: Agente + Info + Valores (1/3) */}
           <div className="lg:col-span-1 space-y-6">
             {/* Agente Responsável */}
-            {agents.find(a => a.id === leadAgentId) && (
-              <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900">
-                <CardHeader className="border-b border-indigo-200 dark:border-indigo-700">
-                  <CardTitle className="flex items-center gap-2 text-indigo-900 dark:text-indigo-100">
-                    <Building2 className="w-5 h-5" />
-                    Agente Responsável
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  {(() => {
-                    const agent = agents.find(a => a.id === leadAgentId);
-                    return agent ? (
-                      <div className="flex items-center gap-4">
-                        {agent.photo_url ? (
-                          <img 
-                            src={agent.photo_url} 
-                            alt={agent.name}
-                            className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-indigo-800 shadow-lg"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded-full bg-indigo-600 dark:bg-indigo-700 flex items-center justify-center border-4 border-white dark:border-indigo-800 shadow-lg">
-                            <span className="text-2xl font-bold text-white">
-                              {agent.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex-1">
-                          <p className="font-bold text-lg text-indigo-900 dark:text-indigo-100">{agent.name}</p>
-                          <div className="space-y-1 mt-2">
-                            <p className="text-sm text-indigo-800 dark:text-indigo-200 flex items-center gap-1">
-                              <Phone className="w-3 h-3" />
-                              {agent.phone}
+            <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900">
+              <CardHeader className="border-b border-indigo-200 dark:border-indigo-700">
+                <CardTitle className="flex items-center gap-2 text-indigo-900 dark:text-indigo-100">
+                  <Building2 className="w-5 h-5" />
+                  Agente Responsável
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6 space-y-4">
+                {(() => {
+                  const agent = agents.find(a => String(a.id) === String(leadAgentId));
+                  if (!agent) {
+                    return (
+                      <p className="text-sm text-indigo-900/70 dark:text-indigo-100/70">
+                        Nenhum agente atribuído a este lead.
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-4">
+                      {agent.photo_url ? (
+                        <img
+                          src={agent.photo_url}
+                          alt={agent.name}
+                          className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-indigo-800 shadow-lg"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-indigo-600 dark:bg-indigo-700 flex items-center justify-center border-4 border-white dark:border-indigo-800 shadow-lg">
+                          <span className="text-2xl font-bold text-white">
+                            {agent.name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <p className="font-bold text-lg text-indigo-900 dark:text-indigo-100">{agent.name}</p>
+                        <div className="space-y-1 mt-2">
+                          <p className="text-sm text-indigo-800 dark:text-indigo-200 flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            {agent.phone}
+                          </p>
+                          {agent.email && (
+                            <p className="text-sm text-indigo-800 dark:text-indigo-200 flex items-center gap-1 truncate">
+                              <Mail className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate">{agent.email}</span>
                             </p>
-                            {agent.email && (
-                              <p className="text-sm text-indigo-800 dark:text-indigo-200 flex items-center gap-1 truncate">
-                                <Mail className="w-3 h-3 flex-shrink-0" />
-                                <span className="truncate">{agent.email}</span>
-                              </p>
-                            )}
-                            {agent.team && (
-                              <Badge className="mt-2 bg-white dark:bg-indigo-800 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-600">
-                                {agent.team}
-                              </Badge>
-                            )}
-                          </div>
+                          )}
+                          {agent.team && (
+                            <Badge className="mt-2 bg-white dark:bg-indigo-800 text-indigo-800 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-600">
+                              {agent.team}
+                            </Badge>
+                          )}
                         </div>
                       </div>
-                    ) : null;
-                  })()}
-                </CardContent>
-              </Card>
-            )}
+                    </div>
+                  );
+                })()}
+
+                {(isAdmin || isCoordinator) && (
+                  <div className="pt-4 border-t border-indigo-200 dark:border-indigo-700 space-y-2">
+                    <Label className="text-xs font-semibold text-indigo-900 dark:text-indigo-100 flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5" />
+                      Reatribuir agente responsável
+                    </Label>
+                    <div className="flex gap-2">
+                      <Select
+                        value={reassignAgentId}
+                        onValueChange={setReassignAgentId}
+                        disabled={reassignAgentMutation.isPending}
+                      >
+                        <SelectTrigger className="flex-1 bg-white dark:bg-gray-900 border-indigo-300 dark:border-indigo-700 text-sm">
+                          <SelectValue placeholder="Escolha o novo agente" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agents
+                            .filter(a => a.active !== false)
+                            .map(a => (
+                              <SelectItem key={a.id} value={String(a.id)}>
+                                {a.name}{a.team ? ` — ${a.team}` : ''}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        onClick={handleReassignAgent}
+                        disabled={
+                          !reassignAgentId ||
+                          String(reassignAgentId) === String(leadAgentId) ||
+                          reassignAgentMutation.isPending
+                        }
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                      >
+                        {reassignAgentMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          'Reatribuir'
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-indigo-900/70 dark:text-indigo-100/70">
+                      A troca fica registrada na linha do tempo de atividades do lead.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Informações da Empresa */}
             <Card className="bg-white dark:bg-gray-900">
