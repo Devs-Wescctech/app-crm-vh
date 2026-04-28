@@ -465,6 +465,7 @@ export default function SalesPJAgentPeriodsReport() {
         days: Number(s.totalDays.toFixed(2)),
         leadCount: s.leadCount,
         totalValue: s.totalValue || 0,
+        teamId: s.teamId,
       }));
   }, [teamSummary]);
 
@@ -478,6 +479,15 @@ export default function SalesPJAgentPeriodsReport() {
         totalValue: s.totalValue || 0,
       }));
   }, [agentSummary]);
+
+  const handleTeamBarClick = (entry) => {
+    const payload = entry?.payload || entry;
+    if (!payload || !payload.teamId) return;
+    const clickedId = String(payload.teamId);
+    setSelectedTeam((current) =>
+      current && String(current) === clickedId ? null : clickedId
+    );
+  };
 
   const chartData = useMemo(() => {
     const sorted = [...agentSummary.summary]
@@ -882,7 +892,11 @@ export default function SalesPJAgentPeriodsReport() {
           {!isLoading && !isFetching && teamChartData.length > 0 && (
             <div className="px-4 pt-4 pb-2 border-b border-gray-200 dark:border-gray-800">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                Comparativo de dias de responsabilidade por filial
+                Comparativo de dias de responsabilidade por filial.{" "}
+                <span className="italic">
+                  Clique em uma barra para filtrar o relatório por aquela
+                  filial; clique novamente para remover o filtro.
+                </span>
               </p>
               <ResponsiveContainer
                 width="100%"
@@ -926,13 +940,31 @@ export default function SalesPJAgentPeriodsReport() {
                     dataKey="days"
                     fill="#6366f1"
                     radius={[0, 4, 4, 0]}
+                    onClick={handleTeamBarClick}
+                    style={{ cursor: "pointer" }}
                   >
-                    {teamChartData.map((_entry, index) => (
-                      <Cell
-                        key={`team-cell-${index}`}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      />
-                    ))}
+                    {teamChartData.map((entry, index) => {
+                      const baseColor =
+                        CHART_COLORS[index % CHART_COLORS.length];
+                      const isSelected =
+                        selectedTeam &&
+                        entry.teamId &&
+                        String(entry.teamId) === String(selectedTeam);
+                      const isDimmed =
+                        selectedTeam &&
+                        (!entry.teamId ||
+                          String(entry.teamId) !== String(selectedTeam));
+                      return (
+                        <Cell
+                          key={`team-cell-${index}`}
+                          fill={baseColor}
+                          fillOpacity={isDimmed ? 0.35 : 1}
+                          stroke={isSelected ? "#1f2937" : undefined}
+                          strokeWidth={isSelected ? 2 : 0}
+                          cursor={entry.teamId ? "pointer" : "default"}
+                        />
+                      );
+                    })}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
