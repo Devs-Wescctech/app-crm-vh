@@ -88,6 +88,7 @@ A pre-commit hook enforces the rule above:
   - OAuth callback redirect URL: `{origin}/api/functions/google-calendar/callback`
   - Routes: status, auth-url, callback, events, sync, disconnect (per-agent via `req.user.id`)
   - Settings page > "Google Agenda" tab: all users see Connect/Disconnect button, admin also sees credential config
+  - **Lead reassignment → calendar transfer**: When `PUT /leads-pj/:id` changes `agent_id` and pending activities are transferred, the route also (a) updates each transferred row's `created_by` to the new agent and clears `google_event_id`, then (b) enqueues a `delete` op on the previous owner's calendar (using the captured `google_event_id`) and a `create` op on the new owner's calendar via `gcalOutboxService`. Failures only log; the reassignment itself always succeeds.
 
 ### UI/UX Design
 - **Kanban Boards**: Advanced drag-and-drop implementation using `@dnd-kit` with sticky headers, auto-scroll, and mobile responsiveness.

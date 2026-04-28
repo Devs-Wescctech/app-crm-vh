@@ -1557,6 +1557,11 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
 
     let lead;
     let reassignmentSummary = null;
+    // Snapshot das atividades transferidas (com o created_by e google_event_id
+    // anteriores) para que, depois do COMMIT, possamos enfileirar a remoção
+    // do evento na agenda do vendedor antigo e a recriação na agenda do novo
+    // responsável.
+    let transferredActivitySnapshots = [];
 
     if (isAgentReassignment) {
       // Para reatribuição, o update do lead, a transferência das atividades
@@ -1571,19 +1576,40 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
 
         let transferredCount = 0;
         if (transferPendingActivities && lead.agent_id) {
-          const transferRes = await client.query(
-            `UPDATE activities_pj
-                SET original_assigned_to = COALESCE(original_assigned_to, assigned_to),
-                    assigned_to = $1,
-                    reassigned_at = NOW()
-              WHERE lead_id = $2
+          // Bloqueia e captura o estado anterior das atividades pendentes
+          // antes de transferi-las, para podermos sincronizar o Google
+          // Calendar fora da transação sem perder informação do dono antigo.
+          const snapshotRes = await client.query(
+            `SELECT id, type, description, scheduled_at, duration_minutes,
+                    created_by, google_event_id
+               FROM activities_pj
+              WHERE lead_id = $1
                 AND completed = FALSE
                 AND type <> 'agent_change'
-                AND (assigned_to IS DISTINCT FROM $1)
-              RETURNING id`,
-            [String(lead.agent_id), lead.id]
+                AND (assigned_to IS DISTINCT FROM $2)
+              FOR UPDATE`,
+            [lead.id, String(lead.agent_id)]
           );
-          transferredCount = transferRes.rowCount || 0;
+          transferredActivitySnapshots = snapshotRes.rows;
+
+          if (transferredActivitySnapshots.length > 0) {
+            // Atualiza assigned_to (e original_assigned_to/reassigned_at para
+            // auditoria), mas também troca created_by para o novo responsável
+            // e zera google_event_id. O created_by é usado pelos hooks de
+            // gcal como dono da agenda, e zerar google_event_id evita que a
+            // criação seja considerada idempotente pelo worker.
+            await client.query(
+              `UPDATE activities_pj
+                  SET original_assigned_to = COALESCE(original_assigned_to, assigned_to),
+                      assigned_to = $1,
+                      reassigned_at = NOW(),
+                      created_by = $1,
+                      google_event_id = NULL
+                WHERE id = ANY($2::uuid[])`,
+              [String(lead.agent_id), transferredActivitySnapshots.map(r => r.id)]
+            );
+          }
+          transferredCount = transferredActivitySnapshots.length;
         }
 
         const agentLookup = await client.query(
@@ -1656,6 +1682,51 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
           await notifyLeadPJAssigned(lead, lead.agent_id);
         } catch (notifyErr) {
           console.error('[leads-pj] Falha ao notificar reatribuição:', notifyErr.message);
+        }
+      }
+
+      // Sincroniza Google Calendar das atividades transferidas: remove o
+      // evento da agenda do vendedor antigo e o recria na do novo. Usamos o
+      // outbox para que falhas transitórias sejam apenas logadas e
+      // automaticamente reprocessadas, sem bloquear a reatribuição.
+      for (const snapshot of transferredActivitySnapshots) {
+        if (snapshot.created_by && snapshot.google_event_id) {
+          try {
+            await enqueueGcalOp({
+              agentId: snapshot.created_by,
+              activityId: null, // a atividade não foi excluída; só transferida
+              activityTable: 'activities_pj',
+              op: 'delete',
+              payload: { google_event_id: snapshot.google_event_id },
+            });
+          } catch (gcalErr) {
+            console.error(
+              '[leads-pj] Falha ao enfileirar remoção do evento do Google Calendar do vendedor anterior:',
+              gcalErr.message
+            );
+          }
+        }
+
+        if (lead.agent_id && snapshot.scheduled_at) {
+          try {
+            await enqueueGcalOp({
+              agentId: String(lead.agent_id),
+              activityId: snapshot.id,
+              activityTable: 'activities_pj',
+              op: 'create',
+              payload: {
+                type: snapshot.type,
+                description: snapshot.description,
+                scheduled_at: snapshot.scheduled_at,
+                duration_minutes: snapshot.duration_minutes,
+              },
+            });
+          } catch (gcalErr) {
+            console.error(
+              '[leads-pj] Falha ao enfileirar criação do evento do Google Calendar para o novo responsável:',
+              gcalErr.message
+            );
+          }
         }
       }
     } else {
