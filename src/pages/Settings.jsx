@@ -16,6 +16,11 @@ import {
   DEFAULT_TEMPERATURE_RULES,
   getTemperatureRulesFromSettings,
   TEMPERATURE_META,
+  TEMPERATURE_MONITOR_INTERVAL_KEY,
+  DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES,
+  MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES,
+  MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES,
+  getTemperatureMonitorIntervalFromSettings,
 } from "@/components/utils/temperature";
 
 export default function Settings() {
@@ -146,6 +151,7 @@ export default function Settings() {
         {canTemperatureSettings && (
           <TabsContent value="lead-temperature" className="space-y-6">
             <LeadTemperatureRulesEditor settings={settings} onSave={createOrUpdateSettingMutation} />
+            <LeadTemperatureMonitorCadenceEditor settings={settings} onSave={createOrUpdateSettingMutation} />
           </TabsContent>
         )}
 
@@ -560,6 +566,159 @@ function LeadTemperatureRulesEditor({ settings, onSave }) {
           </Button>
           <Button variant="outline" onClick={handleReset} disabled={saving}>
             Restaurar padrões
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function describeIntervalMinutes(minutes) {
+  const m = Number(minutes);
+  if (!Number.isFinite(m) || m <= 0) return '';
+  if (m === 24 * 60) return 'uma vez por dia';
+  if (m < 60) {
+    return m === 1 ? 'a cada 1 minuto' : `a cada ${m} minutos`;
+  }
+  if (m % 60 === 0) {
+    const hours = m / 60;
+    return hours === 1 ? 'a cada 1 hora' : `a cada ${hours} horas`;
+  }
+  return `a cada ${m} minutos`;
+}
+
+function LeadTemperatureMonitorCadenceEditor({ settings, onSave }) {
+  const savedMinutes = getTemperatureMonitorIntervalFromSettings(settings);
+
+  const [value, setValue] = useState(() => String(savedMinutes));
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const lastSyncedRef = useRef(null);
+
+  useEffect(() => {
+    const key = String(savedMinutes);
+    if (lastSyncedRef.current === key) return;
+    if (dirty) return;
+    lastSyncedRef.current = key;
+    setValue(key);
+  }, [savedMinutes, dirty]);
+
+  const update = (next) => {
+    setDirty(true);
+    setValue(next);
+  };
+
+  const handleReset = () => {
+    setValue(String(DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES));
+    setDirty(true);
+    toast.success('Cadência restaurada ao padrão — clique em Salvar para confirmar');
+  };
+
+  const handleSave = async () => {
+    if (value === '' || value === null || value === undefined) {
+      toast.error('Informe a frequência em minutos.');
+      return;
+    }
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0 || Math.floor(n) !== n) {
+      toast.error('Informe um número inteiro de minutos maior que zero.');
+      return;
+    }
+    if (n < MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES) {
+      toast.error(`Mínimo permitido: ${MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES} minuto(s).`);
+      return;
+    }
+    if (n > MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES) {
+      toast.error(`Máximo permitido: ${MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES} minutos (24 horas).`);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onSave.mutateAsync({
+        key: TEMPERATURE_MONITOR_INTERVAL_KEY,
+        value: String(n),
+        type: 'number',
+      });
+      setDirty(false);
+    } catch (e) {
+      // a mutation já dispara um toast de erro via onError
+    }
+    setSaving(false);
+  };
+
+  const previewMinutes = (() => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n);
+  })();
+
+  return (
+    <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+        <CardTitle className="text-gray-900 dark:text-gray-100 text-base flex items-center gap-2">
+          <Thermometer className="w-4 h-4" />
+          Frequência da verificação de leads frios
+        </CardTitle>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Define a cada quantos minutos o sistema avalia os leads em busca de quem virou frio
+          (e dispara os alertas para os vendedores). Mudanças passam a valer no próximo ciclo,
+          sem precisar reiniciar o servidor.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-5 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-xs text-gray-700 dark:text-gray-300">
+              Intervalo entre verificações (minutos)
+            </Label>
+            <Input
+              type="number"
+              min={MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES}
+              max={MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES}
+              step="1"
+              value={value}
+              onChange={(e) => update(e.target.value)}
+              placeholder={`Ex.: ${DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES}`}
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Permitido entre {MIN_TEMPERATURE_MONITOR_INTERVAL_MINUTES} e
+              {' '}{MAX_TEMPERATURE_MONITOR_INTERVAL_MINUTES} minutos (24 horas).
+              Padrão: {DEFAULT_TEMPERATURE_MONITOR_INTERVAL_MINUTES} minutos.
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950/40 p-3 text-xs text-gray-600 dark:text-gray-300 self-start">
+            <div className="font-medium text-gray-700 dark:text-gray-200 mb-1">
+              Pré-visualização
+            </div>
+            {previewMinutes
+              ? <>O monitor rodará <strong>{describeIntervalMinutes(previewMinutes)}</strong>.</>
+              : <>Informe um valor válido para ver a frequência aplicada.</>}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 pt-2">
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ backgroundColor: '#5A2A3C' }}
+            className="text-white hover:opacity-90"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                Salvar frequência
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={handleReset} disabled={saving}>
+            Restaurar padrão
           </Button>
         </div>
       </CardContent>

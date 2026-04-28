@@ -15,7 +15,7 @@ import { runAllAutomations } from './services/automationService.js';
 import { syncAllAgents } from './services/googleCalendarService.js';
 import { startOutboxWorker } from './workers/gcalOutboxWorker.js';
 import { createNotification } from './services/notificationService.js';
-import { checkLeadTemperatures } from './services/leadTemperatureMonitor.js';
+import { checkLeadTemperatures, loadMonitorIntervalMinutes } from './services/leadTemperatureMonitor.js';
 import { query as dbQuery } from './config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -172,26 +172,42 @@ initDatabase()
 
     // Lead temperature monitor — alerts the assigned agent when one of their
     // PJ leads transitions into "cold" (per `lead_temperature_rules`) and
-    // optionally pings supervisors when a lead turns hot. Runs hourly with a
-    // short initial delay so we don't pile onto the boot sequence.
-    const TEMPERATURE_INTERVAL = 60 * 60 * 1000;
-    setTimeout(() => {
-      checkLeadTemperatures()
-        .then(({ checked, coldNotified, hotNotified }) => {
-          console.log(`[Lead Temperature] Inicial: ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
-        })
-        .catch(err => console.error('[Lead Temperature] Erro na verificação inicial:', err.message));
-    }, 60 * 1000);
-    setInterval(() => {
-      checkLeadTemperatures()
-        .then(({ checked, coldNotified, hotNotified }) => {
-          if (coldNotified > 0 || hotNotified > 0) {
+    // optionally pings supervisors when a lead turns hot. Cadence is admin-
+    // configurable via the `lead_temperature_monitor_interval_minutes` setting
+    // (defaults to hourly). We use a self-rescheduling setTimeout so changes
+    // saved in Settings take effect on the next cycle without a restart.
+    let lastLoggedIntervalMinutes = null;
+    async function scheduleNextTemperatureCheck(initial = false) {
+      const minutes = await loadMonitorIntervalMinutes();
+      if (minutes !== lastLoggedIntervalMinutes) {
+        console.log(`[Lead Temperature] Monitor agendado: a cada ${minutes} minuto(s).`);
+        lastLoggedIntervalMinutes = minutes;
+      }
+      const delayMs = initial ? 60 * 1000 : minutes * 60 * 1000;
+      setTimeout(async () => {
+        try {
+          const { checked, coldNotified, hotNotified } = await checkLeadTemperatures();
+          if (initial) {
+            console.log(`[Lead Temperature] Inicial: ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
+          } else if (coldNotified > 0 || hotNotified > 0) {
             console.log(`[Lead Temperature] ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
           }
-        })
-        .catch(err => console.error('[Lead Temperature] Erro na verificação periódica:', err.message));
-    }, TEMPERATURE_INTERVAL);
-    console.log(`[Lead Temperature] Monitor de temperatura agendado: a cada ${TEMPERATURE_INTERVAL / 60000} minutos.`);
+        } catch (err) {
+          console.error(
+            `[Lead Temperature] Erro na verificação ${initial ? 'inicial' : 'periódica'}:`,
+            err.message
+          );
+        }
+        // Re-read the cadence after each run so admins can change it in
+        // Settings and have the new value picked up without a restart.
+        scheduleNextTemperatureCheck(false).catch((err) =>
+          console.error('[Lead Temperature] Erro ao reagendar monitor:', err.message)
+        );
+      }, delayMs);
+    }
+    scheduleNextTemperatureCheck(true).catch((err) =>
+      console.error('[Lead Temperature] Erro ao iniciar monitor:', err.message)
+    );
   })
   .catch((error) => {
     console.error('Database initialization failed:', error);

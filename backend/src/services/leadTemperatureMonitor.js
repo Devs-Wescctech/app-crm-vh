@@ -9,6 +9,46 @@ import { createNotification, isInAppNotificationEnabled } from './notificationSe
 const NOTIF_TYPE_COLD = 'lead_pj_cold';
 const NOTIF_TYPE_HOT = 'lead_pj_hot';
 
+// Settings key admins use to control how often the cold-lead monitor runs.
+// Stored as a plain integer (minutes). See loadMonitorIntervalMinutes for the
+// accepted range and defaults.
+export const MONITOR_INTERVAL_KEY = 'lead_temperature_monitor_interval_minutes';
+
+// Default cadence when the setting is missing/invalid: once an hour.
+export const DEFAULT_MONITOR_INTERVAL_MINUTES = 60;
+
+// Guardrails so a typo in Settings can't pin the loop to 1ms or push it out
+// past a week. 1 minute lower bound keeps the database load sane; 1 day upper
+// bound keeps the monitor responsive enough to be useful.
+export const MIN_MONITOR_INTERVAL_MINUTES = 1;
+export const MAX_MONITOR_INTERVAL_MINUTES = 24 * 60;
+
+export function normalizeMonitorIntervalMinutes(value) {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_MONITOR_INTERVAL_MINUTES;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MONITOR_INTERVAL_MINUTES;
+  const rounded = Math.round(n);
+  if (rounded < MIN_MONITOR_INTERVAL_MINUTES) return MIN_MONITOR_INTERVAL_MINUTES;
+  if (rounded > MAX_MONITOR_INTERVAL_MINUTES) return MAX_MONITOR_INTERVAL_MINUTES;
+  return rounded;
+}
+
+export async function loadMonitorIntervalMinutes() {
+  try {
+    const result = await query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = $1 LIMIT 1`,
+      [MONITOR_INTERVAL_KEY]
+    );
+    if (result.rows.length === 0) return DEFAULT_MONITOR_INTERVAL_MINUTES;
+    return normalizeMonitorIntervalMinutes(result.rows[0].setting_value);
+  } catch (err) {
+    console.error('[Lead Temperature] Falha ao ler cadência configurada:', err.message);
+    return DEFAULT_MONITOR_INTERVAL_MINUTES;
+  }
+}
+
 async function loadTemperatureRules() {
   const result = await query(
     `SELECT setting_value FROM system_settings WHERE setting_key = $1 LIMIT 1`,
