@@ -207,3 +207,116 @@ export function computeLeadTemperature(lead, activities, rules, now = new Date()
     },
   };
 }
+
+function formatBRL(value) {
+  try {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
+  } catch (e) {
+    return `R$ ${value}`;
+  }
+}
+
+function pluralDays(n) {
+  return `${n} dia${n === 1 ? '' : 's'}`;
+}
+
+function pluralInteractions(n) {
+  return `${n} ${n === 1 ? 'interação' : 'interações'}`;
+}
+
+export function describeTemperatureReasons(temperature, rules) {
+  if (!temperature) return [];
+  const safeRules = rules && rules.hot && rules.cold ? rules : mergeRules(rules);
+  const triggers = temperature.triggers || {};
+  const reasons = [];
+  const window = safeRules.hot.interactionWindowHours || 48;
+
+  if (triggers.hotByDays) {
+    const d = temperature.days ?? 0;
+    reasons.push({
+      key: 'hotByDays',
+      category: 'hot',
+      text: `Contato há ${pluralDays(d)} (regra: ≤ ${pluralDays(safeRules.hot.maxDaysSinceContact)})`,
+    });
+  }
+  if (triggers.hotByInteractions) {
+    reasons.push({
+      key: 'hotByInteractions',
+      category: 'hot',
+      text: `${pluralInteractions(temperature.interactions ?? 0)} nas últimas ${window}h (regra: ≥ ${safeRules.hot.minRecentInteractions})`,
+    });
+  }
+  if (triggers.hotByValue) {
+    reasons.push({
+      key: 'hotByValue',
+      category: 'hot',
+      text: `Valor de ${formatBRL(temperature.value)} (regra: ≥ ${formatBRL(safeRules.hot.minValue)})`,
+    });
+  }
+  if (triggers.coldByDays) {
+    const d = temperature.days ?? 0;
+    reasons.push({
+      key: 'coldByDays',
+      category: 'cold',
+      text: `${pluralDays(d)} sem contato (regra: ≥ ${pluralDays(safeRules.cold.minDaysSinceContact)})`,
+    });
+  }
+  return reasons;
+}
+
+export function describeTemperatureThresholds(rules, triggers) {
+  const safeRules = rules && rules.hot && rules.cold ? rules : mergeRules(rules);
+  const t = triggers || {};
+  const window = safeRules.hot.interactionWindowHours || 48;
+  const rows = [];
+
+  if (safeRules.hot.maxDaysSinceContact !== null && safeRules.hot.maxDaysSinceContact !== undefined) {
+    rows.push({
+      key: 'hotByDays',
+      category: 'hot',
+      text: `Quente se contato nos últimos ${pluralDays(safeRules.hot.maxDaysSinceContact)}`,
+      active: !!t.hotByDays,
+    });
+  }
+  if (safeRules.hot.minRecentInteractions && safeRules.hot.minRecentInteractions > 0) {
+    rows.push({
+      key: 'hotByInteractions',
+      category: 'hot',
+      text: `Quente se ${safeRules.hot.minRecentInteractions}+ ${safeRules.hot.minRecentInteractions === 1 ? 'interação' : 'interações'} nas últimas ${window}h`,
+      active: !!t.hotByInteractions,
+    });
+  }
+  if (safeRules.hot.minValue && safeRules.hot.minValue > 0) {
+    rows.push({
+      key: 'hotByValue',
+      category: 'hot',
+      text: `Quente se valor ≥ ${formatBRL(safeRules.hot.minValue)}`,
+      active: !!t.hotByValue,
+    });
+  }
+  if (safeRules.cold.minDaysSinceContact !== null && safeRules.cold.minDaysSinceContact !== undefined) {
+    rows.push({
+      key: 'coldByDays',
+      category: 'cold',
+      text: `Frio após ${pluralDays(safeRules.cold.minDaysSinceContact)} sem contato`,
+      active: !!t.coldByDays,
+    });
+  }
+  return rows;
+}
+
+export function getTemperatureSummary(temperature, rules) {
+  if (!temperature) return '';
+  const reasons = describeTemperatureReasons(temperature, rules);
+  if (reasons.length > 0) {
+    return `${temperature.label}: ${reasons.map((r) => r.text).join('; ')}`;
+  }
+  if (temperature.key === 'warm') {
+    return `${temperature.label}: nenhuma regra de quente ou frio foi atingida`;
+  }
+  return temperature.label;
+}

@@ -52,7 +52,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
 import { computeLeadTemperature, getTemperatureRulesFromSettings, TEMPERATURE_META } from "@/components/utils/temperature";
-import { Thermometer } from "lucide-react";
+import TemperatureBadge from "@/components/sales/TemperatureBadge";
 import {
   DndContext,
   DragOverlay,
@@ -208,7 +208,7 @@ function DroppableColumnPJ({ id, stage, children, overId, activeId }) {
   );
 }
 
-function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost, temperature }) {
+function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost, temperature, temperatureRules }) {
   const {
     attributes,
     listeners,
@@ -306,13 +306,11 @@ function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigat
           {(lead.porte || temperature) && (
             <div className="flex flex-wrap gap-2 mt-3">
               {temperature && (
-                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${temperature.softClass}`}>
-                  <Thermometer className="w-3 h-3" />
-                  {temperature.label}
-                  {temperature.days !== null && (
-                    <span className="opacity-70 font-normal">({temperature.days}d)</span>
-                  )}
-                </span>
+                <TemperatureBadge
+                  temperature={temperature}
+                  rules={temperatureRules}
+                  size="md"
+                />
               )}
               {lead.porte && (
                 <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium">
@@ -1468,6 +1466,7 @@ export default function LeadsPJKanban() {
                                 updateLeadMutation={updateLeadMutation}
                                 TasksPopover={TasksPopover}
                                 temperature={temperatureByLead.get(String(lead.id))}
+                                temperatureRules={temperatureRules}
                                 onMarkLost={(leadId) => {
                                   setLostReasonDialog({ leadId, fromStage: lead.stage, isDarBaixa: true });
                                   setLostReasonText('');
@@ -1601,13 +1600,11 @@ export default function LeadsPJKanban() {
                                 const t = temperatureByLead.get(String(lead.id));
                                 if (!t) return <span className="text-xs text-gray-400">-</span>;
                                 return (
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${t.softClass}`}>
-                                    <Thermometer className="w-3 h-3" />
-                                    {t.label}
-                                    {t.days !== null && (
-                                      <span className="opacity-70 font-normal">({t.days}d)</span>
-                                    )}
-                                  </span>
+                                  <TemperatureBadge
+                                    temperature={t}
+                                    rules={temperatureRules}
+                                    size="sm"
+                                  />
                                 );
                               })()}
                             </td>

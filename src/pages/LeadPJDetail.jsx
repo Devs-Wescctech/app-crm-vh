@@ -61,7 +61,9 @@ import { toast } from "sonner";
 import LeadPJTimeline from "@/components/sales/LeadPJTimeline";
 import LeadPJPipelineHistory from "@/components/sales/LeadPJPipelineHistory";
 import LeadPJAgentHistory from "@/components/sales/LeadPJAgentHistory";
-import { computeLeadTemperature, getTemperatureRulesFromSettings } from "@/components/utils/temperature";
+import { computeLeadTemperature, getTemperatureRulesFromSettings, describeTemperatureReasons, describeTemperatureThresholds } from "@/components/utils/temperature";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Check, Minus, Info, Thermometer } from "lucide-react";
 
 const STAGES_PJ = [
   { value: "novo", label: "Novo", color: "bg-gray-500", badge: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100" },
@@ -1000,6 +1002,25 @@ export default function LeadPJDetail() {
   };
 
   const temperature = getLeadTemperature();
+  const temperatureComputed = useMemo(() => {
+    if (!lead) return null;
+    const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
+    return computeLeadTemperature({
+      id: lead?.id,
+      last_contact_at: lastContactAt,
+      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
+      value: lead?.value,
+      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
+    }, activities, temperatureRules);
+  }, [lead, editedLead.lastContactAt, activities, temperatureRules]);
+  const temperatureReasons = useMemo(
+    () => describeTemperatureReasons(temperatureComputed, temperatureRules),
+    [temperatureComputed, temperatureRules]
+  );
+  const temperatureThresholds = useMemo(
+    () => describeTemperatureThresholds(temperatureRules, temperatureComputed?.triggers),
+    [temperatureComputed, temperatureRules]
+  );
   const leadAgent = agents.find(a => String(a.id) === String(leadAgentId));
 
   return (
@@ -1142,13 +1163,75 @@ export default function LeadPJDetail() {
                   <span className={`h-2 w-2 rounded-full ${currentStage?.color}`} />
                   {currentStage?.label}
                 </span>
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${
-                  temperature.label === 'Quente' ? 'bg-red-500/20 text-red-100' :
-                  temperature.label === 'Morno' ? 'bg-yellow-500/20 text-yellow-100' :
-                  'bg-blue-400/20 text-blue-100'
-                }`}>
-                  {temperature.label}
-                </span>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Por que essa temperatura?"
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+                        temperature.label === 'Quente' ? 'bg-red-500/20 text-red-100 hover:bg-red-500/30' :
+                        temperature.label === 'Morno' ? 'bg-yellow-500/20 text-yellow-100 hover:bg-yellow-500/30' :
+                        'bg-blue-400/20 text-blue-100 hover:bg-blue-400/30'
+                      }`}
+                    >
+                      <Thermometer className="w-3.5 h-3.5" />
+                      {temperature.label}
+                      <Info className="w-3.5 h-3.5 opacity-70" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" sideOffset={6} className="w-80 p-0 overflow-hidden">
+                    <div className={`px-3 py-2 flex items-center gap-2 ${temperatureComputed?.softClass || ''}`}>
+                      <Thermometer className="w-4 h-4" />
+                      <div className="text-sm font-semibold">{temperatureComputed?.label}</div>
+                      {temperatureComputed?.days !== null && temperatureComputed?.days !== undefined && (
+                        <span className="ml-auto text-[11px] opacity-80">
+                          {temperatureComputed.days}d desde o último contato
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-3 space-y-3 bg-white dark:bg-gray-900">
+                      <section>
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+                          Por que essa temperatura?
+                        </h4>
+                        {temperatureReasons.length > 0 ? (
+                          <ul className="space-y-1">
+                            {temperatureReasons.map((r) => (
+                              <li key={r.key} className="flex items-start gap-2 text-xs text-gray-700 dark:text-gray-200">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+                                <span>{r.text}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs text-gray-600 dark:text-gray-300">
+                            Nenhuma regra de quente ou frio foi atingida — o lead fica como{' '}
+                            <strong>Morno</strong> por padrão.
+                          </p>
+                        )}
+                      </section>
+                      {temperatureThresholds.length > 0 && (
+                        <section>
+                          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+                            Regras configuradas
+                          </h4>
+                          <ul className="space-y-1">
+                            {temperatureThresholds.map((row) => (
+                              <li key={row.key} className={`flex items-start gap-2 text-xs ${row.active ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-500 dark:text-gray-400'}`}>
+                                {row.active ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+                                ) : (
+                                  <Minus className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0" />
+                                )}
+                                <span>{row.text}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {/* Quick Contact Actions */}
@@ -1741,6 +1824,83 @@ export default function LeadPJDetail() {
 
           {/* COLUNA DIREITA: Agente + Info + Valores (1/3) */}
           <div className="lg:col-span-1 space-y-6">
+            {/* Por que essa temperatura? */}
+            {temperatureComputed && (
+              <Card className="bg-white dark:bg-gray-900">
+                <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+                  <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100 text-base">
+                    <Thermometer className="w-5 h-5 text-orange-500" />
+                    Por que essa temperatura?
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-5 space-y-4">
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${temperatureComputed.softClass}`}>
+                    <Thermometer className="w-4 h-4" />
+                    <div className="text-sm font-semibold">{temperatureComputed.label}</div>
+                    {temperatureComputed.days !== null && temperatureComputed.days !== undefined && (
+                      <span className="ml-auto text-[11px] opacity-80">
+                        {temperatureComputed.days}d desde o último contato
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                      Regras atingidas
+                    </h4>
+                    {temperatureReasons.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {temperatureReasons.map((r) => (
+                          <li
+                            key={r.key}
+                            className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200"
+                          >
+                            <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+                            <span>{r.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
+                        Nenhuma regra de quente ou frio foi atingida — o lead fica como{' '}
+                        <strong>Morno</strong> por padrão.
+                      </p>
+                    )}
+                  </div>
+
+                  {temperatureThresholds.length > 0 && (
+                    <div>
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                        Regras configuradas
+                      </h4>
+                      <ul className="space-y-1.5">
+                        {temperatureThresholds.map((row) => (
+                          <li
+                            key={row.key}
+                            className={`flex items-start gap-2 text-sm ${
+                              row.active
+                                ? 'text-gray-900 dark:text-gray-100 font-medium'
+                                : 'text-gray-500 dark:text-gray-400'
+                            }`}
+                          >
+                            {row.active ? (
+                              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+                            ) : (
+                              <Minus className="w-4 h-4 text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0" />
+                            )}
+                            <span>{row.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3">
+                        Ajuste essas regras em Configurações → Temperatura de leads.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Agente Responsável */}
             <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900">
               <CardHeader className="border-b border-indigo-200 dark:border-indigo-700">
