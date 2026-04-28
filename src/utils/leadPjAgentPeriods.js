@@ -125,3 +125,15 @@ export function periodOverlapsRange(period, fromDate, toDate) {
   if (toDate && start > toDate) return false;
   return true;
 }
+
+export function getPeriodOverlapMs(period, fromDate, toDate) {
+  const start = parseDateLoose(period.from);
+  const end = period.to ? parseDateLoose(period.to) : new Date();
+  if (!start || !end) return 0;
+
+  const effectiveStart = fromDate && start < fromDate ? fromDate : start;
+  const effectiveEnd = toDate && end > toDate ? toDate : end;
+
+  const diff = effectiveEnd - effectiveStart;
+  return diff > 0 ? diff : 0;
+}
