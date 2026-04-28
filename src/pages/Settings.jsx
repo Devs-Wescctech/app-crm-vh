@@ -5,12 +5,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { canAccessSystemsItem, hasAnySystemsAccess } from "@/components/utils/permissions";
+import {
+  TEMPERATURE_RULES_KEY,
+  DEFAULT_TEMPERATURE_RULES,
+  getTemperatureRulesFromSettings,
+  TEMPERATURE_META,
+} from "@/components/utils/temperature";
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -70,7 +76,8 @@ export default function Settings() {
   const canSalesFields = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsSalesFields');
   const canGoogleCalendarSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsGoogleCalendar');
   const canAutentiqueSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsAutentique');
-  const anySystemsTab = canSalesFields || canGoogleCalendarSettings || canAutentiqueSettings;
+  const canTemperatureSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsLeadTemperature');
+  const anySystemsTab = canSalesFields || canGoogleCalendarSettings || canAutentiqueSettings || canTemperatureSettings;
 
   if (!anySystemsTab) {
     return (
@@ -86,9 +93,11 @@ export default function Settings() {
 
   const defaultTab = canSalesFields
     ? "sales-fields"
-    : canGoogleCalendarSettings
-      ? "google-calendar"
-      : "autentique";
+    : canTemperatureSettings
+      ? "lead-temperature"
+      : canGoogleCalendarSettings
+        ? "google-calendar"
+        : "autentique";
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-950 min-h-screen">
@@ -108,6 +117,12 @@ export default function Settings() {
               Campos de Vendas
             </TabsTrigger>
           )}
+          {canTemperatureSettings && (
+            <TabsTrigger value="lead-temperature" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
+              <Thermometer className="w-4 h-4 mr-2" />
+              Temperatura de Leads
+            </TabsTrigger>
+          )}
           {canGoogleCalendarSettings && (
             <TabsTrigger value="google-calendar" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
               <Calendar className="w-4 h-4 mr-2" />
@@ -125,6 +140,12 @@ export default function Settings() {
         {canSalesFields && (
           <TabsContent value="sales-fields" className="space-y-6">
             <SalesFieldsManager settings={settings} onSave={createOrUpdateSettingMutation} />
+          </TabsContent>
+        )}
+
+        {canTemperatureSettings && (
+          <TabsContent value="lead-temperature" className="space-y-6">
+            <LeadTemperatureRulesEditor settings={settings} onSave={createOrUpdateSettingMutation} />
           </TabsContent>
         )}
 
@@ -312,6 +333,237 @@ function SalesFieldsManager({ settings, onSave }) {
         />
       </div>
     </div>
+  );
+}
+
+function LeadTemperatureRulesEditor({ settings, onSave }) {
+  const savedRules = getTemperatureRulesFromSettings(settings);
+
+  const buildForm = (rules) => ({
+    hot: {
+      maxDaysSinceContact:
+        rules.hot.maxDaysSinceContact === null ? '' : String(rules.hot.maxDaysSinceContact),
+      minRecentInteractions:
+        rules.hot.minRecentInteractions === null ? '' : String(rules.hot.minRecentInteractions),
+      interactionWindowHours:
+        rules.hot.interactionWindowHours === null ? '' : String(rules.hot.interactionWindowHours),
+      minValue: rules.hot.minValue === null ? '' : String(rules.hot.minValue),
+    },
+    cold: {
+      minDaysSinceContact:
+        rules.cold.minDaysSinceContact === null ? '' : String(rules.cold.minDaysSinceContact),
+    },
+  });
+
+  const [form, setForm] = useState(() => buildForm(savedRules));
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const lastSyncedRef = useRef(null);
+
+  const savedJson = JSON.stringify(savedRules);
+
+  useEffect(() => {
+    if (lastSyncedRef.current === savedJson) return;
+    if (dirty) return;
+    lastSyncedRef.current = savedJson;
+    setForm(buildForm(savedRules));
+  }, [savedJson, dirty]);
+
+  const update = (group, field, value) => {
+    setDirty(true);
+    setForm((prev) => ({
+      ...prev,
+      [group]: { ...prev[group], [field]: value },
+    }));
+  };
+
+  const handleReset = () => {
+    setForm(buildForm(DEFAULT_TEMPERATURE_RULES));
+    setDirty(true);
+    toast.success('Critérios restaurados aos padrões — clique em Salvar para confirmar');
+  };
+
+  const parseNumber = (value, { allowZero = true } = {}) => {
+    if (value === '' || value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return undefined;
+    if (!allowZero && n === 0) return undefined;
+    return n;
+  };
+
+  const handleSave = async () => {
+    const hot = {
+      maxDaysSinceContact: parseNumber(form.hot.maxDaysSinceContact),
+      minRecentInteractions: parseNumber(form.hot.minRecentInteractions),
+      interactionWindowHours: parseNumber(form.hot.interactionWindowHours, { allowZero: false }),
+      minValue: parseNumber(form.hot.minValue),
+    };
+    const cold = {
+      minDaysSinceContact: parseNumber(form.cold.minDaysSinceContact),
+    };
+
+    if (
+      hot.maxDaysSinceContact === undefined ||
+      hot.minRecentInteractions === undefined ||
+      hot.interactionWindowHours === undefined ||
+      hot.minValue === undefined ||
+      cold.minDaysSinceContact === undefined
+    ) {
+      toast.error('Preencha apenas com números válidos (≥ 0). Janela de horas precisa ser > 0.');
+      return;
+    }
+
+    if (hot.interactionWindowHours === null) hot.interactionWindowHours = 48;
+
+    setSaving(true);
+    try {
+      await onSave.mutateAsync({
+        key: TEMPERATURE_RULES_KEY,
+        value: JSON.stringify({ hot, cold }),
+        type: 'json',
+      });
+      setDirty(false);
+    } catch (e) {
+      // erro já é tratado pelo onError da mutation
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+        <CardTitle className="text-gray-900 dark:text-gray-100 text-base flex items-center gap-2">
+          <Thermometer className="w-4 h-4" />
+          Critérios automáticos de temperatura
+        </CardTitle>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Defina como os leads são classificados em quente, morno e frio. As regras são aplicadas em tempo real
+          na listagem e no kanban. Deixe um campo em branco para desativar aquele critério.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-5 space-y-6">
+        <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/50 dark:bg-red-950/20 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${TEMPERATURE_META.hot.badgeClass}`}>
+              {TEMPERATURE_META.hot.label}
+            </span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              um lead vira quente quando satisfaz <strong>qualquer</strong> critério abaixo
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-gray-700 dark:text-gray-300">
+                Último contato há no máximo (dias)
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                value={form.hot.maxDaysSinceContact}
+                onChange={(e) => update('hot', 'maxDaysSinceContact', e.target.value)}
+                placeholder="Ex.: 2"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-700 dark:text-gray-300">
+                Mínimo de interações na janela
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                value={form.hot.minRecentInteractions}
+                onChange={(e) => update('hot', 'minRecentInteractions', e.target.value)}
+                placeholder="Ex.: 3"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-700 dark:text-gray-300">
+                Janela de interações (horas)
+              </Label>
+              <Input
+                type="number"
+                min="1"
+                value={form.hot.interactionWindowHours}
+                onChange={(e) => update('hot', 'interactionWindowHours', e.target.value)}
+                placeholder="Ex.: 48"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-700 dark:text-gray-300">
+                Valor mínimo da proposta (R$)
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.hot.minValue}
+                onChange={(e) => update('hot', 'minValue', e.target.value)}
+                placeholder="Opcional"
+                className="mt-1"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${TEMPERATURE_META.cold.badgeClass}`}>
+              {TEMPERATURE_META.cold.label}
+            </span>
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              um lead vira frio quando satisfaz o critério abaixo
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs text-gray-700 dark:text-gray-300">
+                Sem contato há pelo menos (dias)
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                value={form.cold.minDaysSinceContact}
+                onChange={(e) => update('cold', 'minDaysSinceContact', e.target.value)}
+                placeholder="Ex.: 7"
+                className="mt-1"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-800 dark:text-amber-200">
+          <strong>{TEMPERATURE_META.warm.label}:</strong> qualquer lead que não se encaixe em quente nem em frio
+          é classificado como morno automaticamente.
+        </div>
+
+        <div className="flex items-center gap-2 pt-2">
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ backgroundColor: '#5A2A3C' }}
+            className="text-white hover:opacity-90"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                Salvar critérios
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={handleReset} disabled={saving}>
+            Restaurar padrões
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

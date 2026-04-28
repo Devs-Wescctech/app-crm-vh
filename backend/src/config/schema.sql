@@ -938,6 +938,10 @@ INSERT INTO system_settings (setting_key, setting_value) VALUES
     ('primary_color', '#0066cc')
 ON CONFLICT (setting_key) DO NOTHING;
 
+INSERT INTO system_settings (setting_key, setting_value, setting_type) VALUES
+    ('lead_temperature_rules', '{"hot":{"maxDaysSinceContact":2,"minRecentInteractions":3,"interactionWindowHours":48,"minValue":null},"cold":{"minDaysSinceContact":7}}', 'json')
+ON CONFLICT (setting_key) DO NOTHING;
+
 INSERT INTO teams (name, description) VALUES 
     ('Suporte', 'Equipe de suporte ao cliente')
 ON CONFLICT (name) DO NOTHING;

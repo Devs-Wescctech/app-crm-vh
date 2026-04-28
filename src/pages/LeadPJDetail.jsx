@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import ConfirmDialog from "@/components/common/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -59,6 +59,7 @@ import { toast } from "sonner";
 
 import LeadPJTimeline from "@/components/sales/LeadPJTimeline";
 import LeadPJPipelineHistory from "@/components/sales/LeadPJPipelineHistory";
+import { computeLeadTemperature, getTemperatureRulesFromSettings } from "@/components/utils/temperature";
 
 const STAGES_PJ = [
   { value: "novo", label: "Novo", color: "bg-gray-500", badge: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100" },
@@ -147,6 +148,11 @@ export default function LeadPJDetail() {
     }
     return DEFAULT_INTEREST_OPTIONS_PJ;
   })();
+
+  const temperatureRules = useMemo(
+    () => getTemperatureRulesFromSettings(systemSettings),
+    [systemSettings]
+  );
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ['leadPJ', leadId],
@@ -842,14 +848,26 @@ export default function LeadPJDetail() {
 
   const getLeadTemperature = () => {
     const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
-    const referenceDate = lastContactAt 
-      ? new Date(lastContactAt) 
-      : new Date(lead?.createdDate || lead?.createdAt);
-    const daysSinceContact = Math.floor((new Date() - referenceDate) / (1000 * 60 * 60 * 24));
-    
-    if (daysSinceContact <= 2) return { label: 'Quente', color: 'text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-950', days: daysSinceContact };
-    if (daysSinceContact <= 5) return { label: 'Morno', color: 'text-yellow-600 bg-yellow-100 dark:text-yellow-400 dark:bg-yellow-950', days: daysSinceContact };
-    return { label: 'Frio', color: 'text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-950', days: daysSinceContact };
+    const leadForTemp = {
+      id: lead?.id,
+      last_contact_at: lastContactAt,
+      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
+      value: lead?.value,
+      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
+    };
+    const computed = computeLeadTemperature(leadForTemp, activities, temperatureRules);
+    const colorByKey = {
+      hot: 'text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-950',
+      warm: 'text-yellow-600 bg-yellow-100 dark:text-yellow-400 dark:bg-yellow-950',
+      cold: 'text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-950',
+    };
+    return {
+      key: computed.key,
+      label: computed.label,
+      color: colorByKey[computed.key],
+      days: computed.days ?? 0,
+      interactions: computed.interactions,
+    };
   };
 
   if (isLoading || !lead) {

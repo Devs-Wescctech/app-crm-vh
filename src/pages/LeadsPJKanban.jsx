@@ -51,6 +51,8 @@ import { createPageUrl } from "@/utils";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
+import { computeLeadTemperature, getTemperatureRulesFromSettings, TEMPERATURE_META } from "@/components/utils/temperature";
+import { Thermometer } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -206,7 +208,7 @@ function DroppableColumnPJ({ id, stage, children, overId, activeId }) {
   );
 }
 
-function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost }) {
+function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost, temperature }) {
   const {
     attributes,
     listeners,
@@ -301,11 +303,22 @@ function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigat
             </div>
           )}
 
-          {lead.porte && (
+          {(lead.porte || temperature) && (
             <div className="flex flex-wrap gap-2 mt-3">
-              <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium">
-                {lead.porte}
-              </span>
+              {temperature && (
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold ${temperature.softClass}`}>
+                  <Thermometer className="w-3 h-3" />
+                  {temperature.label}
+                  {temperature.days !== null && (
+                    <span className="opacity-70 font-normal">({temperature.days}d)</span>
+                  )}
+                </span>
+              )}
+              {lead.porte && (
+                <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium">
+                  {lead.porte}
+                </span>
+              )}
             </div>
           )}
 
@@ -417,16 +430,17 @@ export default function LeadsPJKanban() {
     [showClosedLeads]
   );
   const [viewMode, setViewMode] = useState('kanban');
+  const DEFAULT_FILTERS = { search: '', agent: 'all', team: 'all', porte: 'all', temperature: 'all', dateFrom: '', dateTo: '' };
   const [filters, setFilters] = useState(() => {
     const saved = localStorage.getItem('leadsPJKanbanFilters');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        return { ...DEFAULT_FILTERS, ...JSON.parse(saved) };
       } catch (e) {
-        return { search: '', agent: 'all', team: 'all', porte: 'all', dateFrom: '', dateTo: '' };
+        return { ...DEFAULT_FILTERS };
       }
     }
-    return { search: '', agent: 'all', team: 'all', porte: 'all', dateFrom: '', dateTo: '' };
+    return { ...DEFAULT_FILTERS };
   });
 
   useEffect(() => {
@@ -434,12 +448,11 @@ export default function LeadsPJKanban() {
   }, [filters]);
 
   const clearFilters = () => {
-    const defaultFilters = { search: '', agent: 'all', team: 'all', porte: 'all', dateFrom: '', dateTo: '' };
-    setFilters(defaultFilters);
+    setFilters({ ...DEFAULT_FILTERS });
     localStorage.removeItem('leadsPJKanbanFilters');
   };
 
-  const hasActiveFilters = filters.search || filters.agent !== 'all' || filters.team !== 'all' || filters.porte !== 'all' || filters.dateFrom || filters.dateTo;
+  const hasActiveFilters = filters.search || filters.agent !== 'all' || filters.team !== 'all' || filters.porte !== 'all' || filters.temperature !== 'all' || filters.dateFrom || filters.dateTo;
   const [listPage, setListPage] = useState(1);
   const [isDraggingCard, setIsDraggingCard] = useState(false);
   const [lostReasonDialog, setLostReasonDialog] = useState(null);
@@ -608,6 +621,26 @@ export default function LeadsPJKanban() {
     refetchInterval: 30000,
   });
 
+  const { data: systemSettings = [] } = useQuery({
+    queryKey: ['systemSettings'],
+    queryFn: () => base44.entities.SystemSettings.list(),
+    staleTime: 60000,
+  });
+
+  const temperatureRules = useMemo(
+    () => getTemperatureRulesFromSettings(systemSettings),
+    [systemSettings]
+  );
+
+  const temperatureByLead = useMemo(() => {
+    const now = new Date();
+    const map = new Map();
+    for (const lead of leadsPJ) {
+      map.set(String(lead.id), computeLeadTemperature(lead, allActivitiesPJ, temperatureRules, now));
+    }
+    return map;
+  }, [leadsPJ, allActivitiesPJ, temperatureRules]);
+
   const leadsQueryKey = ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id];
   
   const updateLeadMutation = useMutation({
@@ -745,6 +778,11 @@ export default function LeadsPJKanban() {
 
     if (filters.porte !== 'all' && lead.porte && lead.porte !== filters.porte) {
       return false;
+    }
+
+    if (filters.temperature !== 'all') {
+      const t = temperatureByLead.get(String(lead.id));
+      if (!t || t.key !== filters.temperature) return false;
     }
 
     if (filters.dateFrom && lead.createdAt) {
@@ -1108,7 +1146,7 @@ export default function LeadsPJKanban() {
               <span className="hidden sm:inline">Filtros</span>
               {hasActiveFilters && (
                 <Badge variant="info" className="ml-2">
-                  {[filters.search, filters.agent !== 'all', filters.team !== 'all', filters.porte !== 'all', filters.dateFrom, filters.dateTo].filter(Boolean).length}
+                  {[filters.search, filters.agent !== 'all', filters.team !== 'all', filters.porte !== 'all', filters.temperature !== 'all', filters.dateFrom, filters.dateTo].filter(Boolean).length}
                 </Badge>
               )}
             </Button>
@@ -1196,6 +1234,23 @@ export default function LeadsPJKanban() {
                           <SelectItem value="pequena">Pequena</SelectItem>
                           <SelectItem value="media">Média</SelectItem>
                           <SelectItem value="grande">Grande</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                        Temperatura
+                      </label>
+                      <Select value={filters.temperature} onValueChange={(val) => setFilters({...filters, temperature: val})}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Todas as temperaturas" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas as temperaturas</SelectItem>
+                          <SelectItem value="hot">{TEMPERATURE_META.hot.label}</SelectItem>
+                          <SelectItem value="warm">{TEMPERATURE_META.warm.label}</SelectItem>
+                          <SelectItem value="cold">{TEMPERATURE_META.cold.label}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1412,6 +1467,7 @@ export default function LeadsPJKanban() {
                                 formatDate={formatDate}
                                 updateLeadMutation={updateLeadMutation}
                                 TasksPopover={TasksPopover}
+                                temperature={temperatureByLead.get(String(lead.id))}
                                 onMarkLost={(leadId) => {
                                   setLostReasonDialog({ leadId, fromStage: lead.stage, isDarBaixa: true });
                                   setLostReasonText('');
@@ -1486,6 +1542,7 @@ export default function LeadsPJKanban() {
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Contato</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Etapa</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Porte</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Temperatura</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Valor</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Agente</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Criado em</th>
@@ -1538,6 +1595,21 @@ export default function LeadsPJKanban() {
                               <Badge variant="glass" className="text-xs">
                                 {getCompanySizeLabel(lead.porte)}
                               </Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const t = temperatureByLead.get(String(lead.id));
+                                if (!t) return <span className="text-xs text-gray-400">-</span>;
+                                return (
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${t.softClass}`}>
+                                    <Thermometer className="w-3 h-3" />
+                                    {t.label}
+                                    {t.days !== null && (
+                                      <span className="opacity-70 font-normal">({t.days}d)</span>
+                                    )}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3">
                               <span className="font-semibold text-sm text-purple-600 dark:text-purple-400">

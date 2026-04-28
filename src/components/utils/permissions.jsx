@@ -163,6 +163,7 @@ export const SYSTEMS_PERMISSION_KEYS = [
   'SystemsSalesFields',
   'SystemsGoogleCalendar',
   'SystemsAutentique',
+  'SystemsLeadTemperature',
 ];
 
 export function canAccessSystemsItem(agent, key) {
