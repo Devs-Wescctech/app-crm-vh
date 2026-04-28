@@ -9,6 +9,7 @@ import { loadAgentMiddleware, requirePermission, requireRole } from '../middlewa
 import { assignTicket, distributeUnassignedTickets, DISTRIBUTION_ALGORITHMS } from '../services/ticketDistribution.js';
 import { checkAllSLAWarnings, checkSLABreach, recordFirstResponse, recordStatusChange } from '../services/slaService.js';
 import { runAllAutomations, runAutomationsForLead } from '../services/leadAutomation.js';
+import { checkLeadTemperatures } from '../services/leadTemperatureMonitor.js';
 import { generateProposalPDF } from '../services/pdfService.js';
 import { sendWhatsAppMessage, sendDocument, sendTextMessage } from '../services/whatsappService.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -170,6 +171,19 @@ router.post('/run-lead-automations', authMiddleware, loadAgentMiddleware, requir
   } catch (error) {
     console.error('Error running automations:', error);
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin-only manual trigger for the cold/hot lead temperature monitor.
+// Runs the same routine the scheduler runs (without touching the schedule),
+// so admins can validate a new cadence/threshold combination right away.
+router.post('/run-lead-temperature-check', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const result = await checkLeadTemperatures();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[Lead Temperature] Erro na verificação manual:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

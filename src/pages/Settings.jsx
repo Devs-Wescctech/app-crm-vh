@@ -151,7 +151,7 @@ export default function Settings() {
         {canTemperatureSettings && (
           <TabsContent value="lead-temperature" className="space-y-6">
             <LeadTemperatureRulesEditor settings={settings} onSave={createOrUpdateSettingMutation} />
-            <LeadTemperatureMonitorCadenceEditor settings={settings} onSave={createOrUpdateSettingMutation} />
+            <LeadTemperatureMonitorCadenceEditor settings={settings} onSave={createOrUpdateSettingMutation} isAdmin={isAdmin} />
           </TabsContent>
         )}
 
@@ -587,12 +587,14 @@ function describeIntervalMinutes(minutes) {
   return `a cada ${m} minutos`;
 }
 
-function LeadTemperatureMonitorCadenceEditor({ settings, onSave }) {
+function LeadTemperatureMonitorCadenceEditor({ settings, onSave, isAdmin = false }) {
   const savedMinutes = getTemperatureMonitorIntervalFromSettings(settings);
 
   const [value, setValue] = useState(() => String(savedMinutes));
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [runningNow, setRunningNow] = useState(false);
+  const [lastRun, setLastRun] = useState(null);
   const lastSyncedRef = useRef(null);
 
   useEffect(() => {
@@ -653,6 +655,41 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave }) {
     return Math.round(n);
   })();
 
+  // Manual trigger of the same routine the scheduler runs. Doesn't touch the
+  // scheduled cadence — it's meant for "I just changed the threshold, did
+  // anything actually fire?" verification.
+  const handleRunNow = async () => {
+    setRunningNow(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch('/api/functions/run-lead-temperature-check', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        const msg = data?.message || `Falha ao executar verificação (HTTP ${res.status}).`;
+        toast.error(msg);
+      } else {
+        const checked = Number(data.checked) || 0;
+        const cold = Number(data.coldNotified) || 0;
+        const hot = Number(data.hotNotified) || 0;
+        const leadsLabel = checked === 1 ? '1 lead avaliado' : `${checked} leads avaliados`;
+        const coldLabel = cold === 1 ? '1 alerta de frio enviado' : `${cold} alertas de frio enviados`;
+        const hotLabel = hot === 1 ? '1 aviso de quente enviado' : `${hot} avisos de quente enviados`;
+        const summary = `${leadsLabel}, ${coldLabel}, ${hotLabel}.`;
+        setLastRun({ at: new Date(), checked, cold, hot, summary });
+        toast.success(`Verificação concluída: ${summary}`);
+      }
+    } catch (err) {
+      toast.error(`Erro ao executar verificação: ${err?.message || 'tente novamente'}`);
+    }
+    setRunningNow(false);
+  };
+
   return (
     <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
       <CardHeader className="border-b border-gray-200 dark:border-gray-800">
@@ -698,7 +735,7 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 pt-2">
+        <div className="flex flex-wrap items-center gap-2 pt-2">
           <Button
             onClick={handleSave}
             disabled={saving}
@@ -720,7 +757,37 @@ function LeadTemperatureMonitorCadenceEditor({ settings, onSave }) {
           <Button variant="outline" onClick={handleReset} disabled={saving}>
             Restaurar padrão
           </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              onClick={handleRunNow}
+              disabled={runningNow}
+              className="ml-auto"
+              title="Executa a mesma rotina do agendador agora, sem esperar o próximo ciclo"
+            >
+              {runningNow ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Executando...
+                </>
+              ) : (
+                <>
+                  <Thermometer className="w-4 h-4 mr-2" />
+                  Executar verificação agora
+                </>
+              )}
+            </Button>
+          )}
         </div>
+
+        {isAdmin && lastRun && (
+          <div className="mt-2 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
+            <div className="font-medium">
+              Última execução manual: {lastRun.at.toLocaleString('pt-BR')}
+            </div>
+            <div className="mt-0.5">{lastRun.summary}</div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
