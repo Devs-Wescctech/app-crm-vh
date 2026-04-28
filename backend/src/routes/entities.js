@@ -1552,9 +1552,17 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
         const toName = lead.agent_id ? (nameById.get(String(lead.agent_id)) || 'Agente removido') : 'Sem agente';
         const actorName = actingAgent?.name || actingAgent?.email || 'Sistema';
 
+        const reassignmentMetadata = {
+          from_agent_id: oldLead.agent_id ? String(oldLead.agent_id) : null,
+          to_agent_id: lead.agent_id ? String(lead.agent_id) : null,
+          from_agent_name: fromName,
+          to_agent_name: toName,
+          actor_id: actingAgent?.id ? String(actingAgent.id) : null,
+          actor_name: actorName,
+        };
         await query(
-          `INSERT INTO activities_pj (lead_id, type, title, description, created_by, assigned_to, completed)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO activities_pj (lead_id, type, title, description, created_by, assigned_to, completed, metadata)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [
             lead.id,
             'agent_change',
@@ -1563,6 +1571,7 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
             actingAgent?.id || null,
             lead.agent_id ? String(lead.agent_id) : null,
             true,
+            JSON.stringify(reassignmentMetadata),
           ]
         );
       } catch (logErr) {

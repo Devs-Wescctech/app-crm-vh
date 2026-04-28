@@ -51,6 +51,7 @@ import {
   Upload,
   Image as ImageIcon,
   Shield,
+  History,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -59,6 +60,7 @@ import { toast } from "sonner";
 
 import LeadPJTimeline from "@/components/sales/LeadPJTimeline";
 import LeadPJPipelineHistory from "@/components/sales/LeadPJPipelineHistory";
+import LeadPJAgentHistory from "@/components/sales/LeadPJAgentHistory";
 import { computeLeadTemperature, getTemperatureRulesFromSettings } from "@/components/utils/temperature";
 
 const STAGES_PJ = [
@@ -1232,7 +1234,7 @@ export default function LeadPJDetail() {
           {/* COLUNA ESQUERDA: TABS (2/3) */}
           <div className="lg:col-span-2">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-1">
+              <TabsList className="grid w-full grid-cols-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-1">
                 <TabsTrigger value="activities" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
                   <Activity className="w-4 h-4 mr-2" />
                   Atividades
@@ -1249,6 +1251,10 @@ export default function LeadPJDetail() {
                 <TabsTrigger value="proposal" className="data-[state=active]:bg-yellow-600 data-[state=active]:text-white">
                   <FileText className="w-4 h-4 mr-2" />
                   Proposta
+                </TabsTrigger>
+                <TabsTrigger value="agent_history" className="data-[state=active]:bg-amber-600 data-[state=active]:text-white">
+                  <History className="w-4 h-4 mr-2" />
+                  Histórico
                 </TabsTrigger>
               </TabsList>
 
@@ -1683,6 +1689,23 @@ export default function LeadPJDetail() {
                         </div>
                       )}
                     </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="agent_history" className="mt-6">
+                <Card className="bg-white dark:bg-gray-900">
+                  <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+                    <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
+                      <History className="w-5 h-5 text-amber-600" />
+                      Histórico de Responsáveis
+                    </CardTitle>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                      Quem foi dono deste lead em cada período, derivado das reatribuições registradas na timeline.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <LeadPJAgentHistory lead={lead} activities={activities} agents={agents} />
                   </CardContent>
                 </Card>
               </TabsContent>

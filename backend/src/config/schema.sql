@@ -767,6 +767,11 @@ ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_role VARCHAR(255);
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
 
 -- =====================
+-- ACTIVITIES PJ — metadata estruturada (ex.: histórico de reatribuição)
+-- =====================
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS metadata JSONB;
+
+-- =====================
 -- LEAD PJ FILES (Anexos da Proposta)
 -- =====================
 CREATE TABLE IF NOT EXISTS lead_pj_files (
