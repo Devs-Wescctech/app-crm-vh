@@ -15,6 +15,7 @@ import { runAllAutomations } from './services/automationService.js';
 import { syncAllAgents } from './services/googleCalendarService.js';
 import { startOutboxWorker } from './workers/gcalOutboxWorker.js';
 import { createNotification } from './services/notificationService.js';
+import { checkLeadTemperatures } from './services/leadTemperatureMonitor.js';
 import { query as dbQuery } from './config/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -168,6 +169,29 @@ initDatabase()
 
     setInterval(checkUpcomingActivities, 5 * 60 * 1000);
     console.log('[Activity Reminder] Verificação agendada: a cada 5 minutos.');
+
+    // Lead temperature monitor — alerts the assigned agent when one of their
+    // PJ leads transitions into "cold" (per `lead_temperature_rules`) and
+    // optionally pings supervisors when a lead turns hot. Runs hourly with a
+    // short initial delay so we don't pile onto the boot sequence.
+    const TEMPERATURE_INTERVAL = 60 * 60 * 1000;
+    setTimeout(() => {
+      checkLeadTemperatures()
+        .then(({ checked, coldNotified, hotNotified }) => {
+          console.log(`[Lead Temperature] Inicial: ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
+        })
+        .catch(err => console.error('[Lead Temperature] Erro na verificação inicial:', err.message));
+    }, 60 * 1000);
+    setInterval(() => {
+      checkLeadTemperatures()
+        .then(({ checked, coldNotified, hotNotified }) => {
+          if (coldNotified > 0 || hotNotified > 0) {
+            console.log(`[Lead Temperature] ${checked} leads avaliados, ${coldNotified} alertas de frio, ${hotNotified} avisos de quente.`);
+          }
+        })
+        .catch(err => console.error('[Lead Temperature] Erro na verificação periódica:', err.message));
+    }, TEMPERATURE_INTERVAL);
+    console.log(`[Lead Temperature] Monitor de temperatura agendado: a cada ${TEMPERATURE_INTERVAL / 60000} minutos.`);
   })
   .catch((error) => {
     console.error('Database initialization failed:', error);

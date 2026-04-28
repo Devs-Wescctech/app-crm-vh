@@ -1,5 +1,27 @@
 import { query } from '../config/database.js';
 
+/**
+ * Returns true if the user has explicitly disabled in-app notifications for the
+ * given notification type. Absent rows = enabled (consistent with the legacy
+ * behavior of every other notify* helper in this file, which never gated).
+ */
+export async function isInAppNotificationEnabled(userEmail, notificationType) {
+  if (!userEmail || !notificationType) return true;
+  try {
+    const result = await query(
+      `SELECT in_app_enabled FROM notification_preferences
+       WHERE user_email = $1 AND notification_type = $2
+       LIMIT 1`,
+      [userEmail, notificationType]
+    );
+    if (result.rows.length === 0) return true;
+    return result.rows[0].in_app_enabled !== false;
+  } catch (error) {
+    console.error('[Notification] preference lookup failed, defaulting to enabled:', error.message);
+    return true;
+  }
+}
+
 export async function createNotification({ 
   userEmail, 
   type, 

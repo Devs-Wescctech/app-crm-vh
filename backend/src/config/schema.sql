@@ -907,6 +907,14 @@ CREATE INDEX IF NOT EXISTS idx_leads_assigned_agent_id ON leads(assigned_agent_i
 CREATE INDEX IF NOT EXISTS idx_leads_pj_agent ON leads_pj(agent_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_document ON contacts(document);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_email);
+
+-- Columns added on production via runtime migrations; declared here for parity
+-- so a fresh database created from schema.sql exposes the same shape.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS entity_id UUID;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal';
+CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_type_entity ON notifications(type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audits_agent ON call_audits(agent_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_status_history_ticket_id ON ticket_status_history(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_lead_history_lead_id ON lead_history(lead_id);
