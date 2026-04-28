@@ -132,7 +132,13 @@ const entities = {
   'distribution-rules': { tableName: 'distribution_rules', searchFields: ['name'] },
   'portal-sessions': { tableName: 'portal_sessions', allowedFilters: ['contact_id'] },
   'system-settings': { tableName: 'system_settings', searchFields: ['setting_key'] },
-  notifications: { allowedFilters: ['user_email', 'read', 'type'] },
+  notifications: {
+    allowedFilters: ['user_email', 'read', 'type'],
+    // Hide rows that were inserted purely to act as the cross-channel dedupe
+    // ledger when the user disabled the in-app preference. This matches the
+    // filter used by the legacy /check-notifications endpoint.
+    extraWhere: ['COALESCE(in_app_visible, true) = true'],
+  },
   'notification-preferences': { tableName: 'notification_preferences', allowedFilters: ['user_email'] },
   'quality-checklists': { tableName: 'quality_checklists', searchFields: ['name'] },
   'call-audits': { tableName: 'call_audits', allowedFilters: ['agent_id', 'ticket_id', 'status'] },

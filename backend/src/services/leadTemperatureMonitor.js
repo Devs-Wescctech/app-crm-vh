@@ -4,7 +4,12 @@ import {
   parseTemperatureRules,
   computeLeadTemperature,
 } from '../utils/temperature.js';
-import { createNotification, isInAppNotificationEnabled } from './notificationService.js';
+import {
+  createNotification,
+  getNotificationChannelPrefs,
+  sendNotificationEmail,
+  sendPushNotification,
+} from './notificationService.js';
 
 const NOTIF_TYPE_COLD = 'lead_pj_cold';
 const NOTIF_TYPE_HOT = 'lead_pj_hot';
@@ -58,12 +63,114 @@ async function loadTemperatureRules() {
   return parseTemperatureRules(result.rows[0].setting_value);
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildAlertEmailHtml({ title, message, link }) {
+  const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
+  const fullLink = link ? (baseUrl ? `${baseUrl}${link}` : link) : null;
+  const ctaHtml = fullLink
+    ? `<p style="margin:24px 0;"><a href="${escapeHtml(fullLink)}" style="display:inline-block;background:#0f172a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-family:Arial,sans-serif;font-size:14px;">Abrir lead</a></p>`
+    : '';
+  return `<div style="font-family:Arial,sans-serif;color:#0f172a;max-width:560px;">
+  <h2 style="margin:0 0 12px;font-size:18px;">${escapeHtml(title)}</h2>
+  <p style="margin:0;font-size:14px;line-height:1.5;">${escapeHtml(message)}</p>
+  ${ctaHtml}
+  <p style="margin:24px 0 0;font-size:12px;color:#64748b;">Você está recebendo este e-mail porque a notificação por e-mail está ativada nas suas preferências.</p>
+</div>`;
+}
+
+/**
+ * Fan an alert out across the channels the recipient has enabled. The in-app
+ * notification row is the dedupe ledger — it is always inserted when at least
+ * one channel is on, even if the user disabled the in-app preference (in that
+ * case `in_app_visible` is set to false so the bell hides it). This way the
+ * dedupe queries below stay correct regardless of which channels delivered.
+ */
+async function deliverAlert({
+  userEmail,
+  type,
+  title,
+  message,
+  link,
+  entityType,
+  entityId,
+  priority,
+}) {
+  const prefs = await getNotificationChannelPrefs(userEmail, type);
+  if (!prefs.inApp && !prefs.email && !prefs.push) {
+    return { delivered: false };
+  }
+
+  // The notifications row is the cross-channel dedupe ledger. If we can't
+  // record it, we deliberately do NOT send email/push: a transient DB error
+  // would otherwise let the same alert go out every poll until the row
+  // finally lands. Fail-closed protects the dedupe guarantee.
+  const ledger = await createNotification({
+    userEmail,
+    type,
+    title,
+    message,
+    link,
+    entityType,
+    entityId,
+    priority,
+    inAppVisible: prefs.inApp,
+  });
+  if (!ledger || ledger.success === false) {
+    console.error(`[Lead Temperature] Skipping fan-out for ${type} → ${userEmail}: ledger insert failed (${ledger?.error || 'unknown'}).`);
+    return { delivered: false };
+  }
+
+  if (prefs.email) {
+    try {
+      await sendNotificationEmail({
+        userEmail,
+        subject: title,
+        html: buildAlertEmailHtml({ title, message, link }),
+        text: `${title}\n\n${message}`,
+      });
+    } catch (error) {
+      console.error(`[Lead Temperature] Email delivery failed for ${userEmail}:`, error.message);
+    }
+  }
+
+  if (prefs.push) {
+    try {
+      await sendPushNotification({
+        userEmail,
+        title,
+        body: message,
+        link,
+        data: { type, entityType, entityId },
+      });
+    } catch (error) {
+      console.error(`[Lead Temperature] Push delivery failed for ${userEmail}:`, error.message);
+    }
+  }
+
+  return { delivered: true };
+}
+
 /**
  * Iterates over active PJ leads, recomputes temperature using the saved rules
  * and fires off notifications for warm→cold transitions (and optionally for
  * warm/cold→hot transitions, which alert the assigned agent's supervisor).
  *
- * Dedupe strategy:
+ * Channel fan-out:
+ *  - In-app: a row in `notifications` (gated on `in_app_visible` so users who
+ *    turned the in-app preference off don't see them in the bell).
+ *  - Email: SMTP via `notificationService.sendNotificationEmail`.
+ *  - Push: Web Push via `notificationService.sendPushNotification`.
+ *
+ * Dedupe strategy (unchanged across channels — the `notifications` table is
+ * the cross-channel ledger):
  *  - Cold: do not notify if a `lead_pj_cold` notification for this lead exists
  *    that was created AFTER the lead's contact reference (last_contact_at, or
  *    created_at when last_contact_at is null). Once the agent records a new
@@ -163,23 +270,20 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
         [NOTIF_TYPE_COLD, lead.id, agent.email, referenceIso]
       );
       if (existing.rows.length === 0) {
-        const enabled = await isInAppNotificationEnabled(agent.email, NOTIF_TYPE_COLD);
-        if (enabled) {
-          const daysLabel = temp.days != null
-            ? (temp.days === 1 ? '1 dia' : `${temp.days} dias`)
-            : 'muitos dias';
-          await createNotification({
-            userEmail: agent.email,
-            type: NOTIF_TYPE_COLD,
-            title: 'Lead esfriou',
-            message: `O lead "${leadLabel}" está sem contato há ${daysLabel}. Retome o atendimento antes que esfrie de vez.`,
-            link: `/LeadsPJ/${lead.id}`,
-            entityType: 'lead_pj',
-            entityId: lead.id,
-            priority: 'high',
-          });
-          coldNotified++;
-        }
+        const daysLabel = temp.days != null
+          ? (temp.days === 1 ? '1 dia' : `${temp.days} dias`)
+          : 'muitos dias';
+        const result = await deliverAlert({
+          userEmail: agent.email,
+          type: NOTIF_TYPE_COLD,
+          title: 'Lead esfriou',
+          message: `O lead "${leadLabel}" está sem contato há ${daysLabel}. Retome o atendimento antes que esfrie de vez.`,
+          link: `/LeadsPJ/${lead.id}`,
+          entityType: 'lead_pj',
+          entityId: lead.id,
+          priority: 'high',
+        });
+        if (result.delivered) coldNotified++;
       }
     }
 
@@ -192,20 +296,17 @@ export async function checkLeadTemperatures({ now = new Date() } = {}) {
         [NOTIF_TYPE_HOT, lead.id, agent.supervisor_email, cutoff]
       );
       if (existing.rows.length === 0) {
-        const enabled = await isInAppNotificationEnabled(agent.supervisor_email, NOTIF_TYPE_HOT);
-        if (enabled) {
-          await createNotification({
-            userEmail: agent.supervisor_email,
-            type: NOTIF_TYPE_HOT,
-            title: 'Lead quente na equipe',
-            message: `O lead "${leadLabel}", com ${agent.name || 'vendedor'}, está quente. Boa hora para acompanhar.`,
-            link: `/LeadsPJ/${lead.id}`,
-            entityType: 'lead_pj',
-            entityId: lead.id,
-            priority: 'normal',
-          });
-          hotNotified++;
-        }
+        const result = await deliverAlert({
+          userEmail: agent.supervisor_email,
+          type: NOTIF_TYPE_HOT,
+          title: 'Lead quente na equipe',
+          message: `O lead "${leadLabel}", com ${agent.name || 'vendedor'}, está quente. Boa hora para acompanhar.`,
+          link: `/LeadsPJ/${lead.id}`,
+          entityType: 'lead_pj',
+          entityId: lead.id,
+          priority: 'normal',
+        });
+        if (result.delivered) hotNotified++;
       }
     }
   }

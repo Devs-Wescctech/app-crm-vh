@@ -913,8 +913,31 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_email);
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50);
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS entity_id UUID;
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS priority VARCHAR(20) DEFAULT 'normal';
+-- in_app_visible lets us record an alert in the notifications ledger (so the
+-- cross-channel dedupe in places like leadTemperatureMonitor still works) even
+-- when the recipient has turned off the in-app preference. The /check-notifications
+-- endpoint filters this out so it never appears in the bell.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS in_app_visible BOOLEAN DEFAULT TRUE;
 CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_type_entity ON notifications(type, entity_id);
+
+-- Web Push subscriptions captured by the frontend (PushManager.subscribe). The
+-- backend uses VAPID via the `web-push` library to deliver pushes to whichever
+-- devices an agent has registered. A user may register more than one device.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_email VARCHAR(255) NOT NULL,
+    endpoint TEXT NOT NULL,
+    p256dh_key TEXT NOT NULL,
+    auth_key TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_used_at TIMESTAMP,
+    last_error TEXT,
+    last_error_at TIMESTAMP,
+    UNIQUE(endpoint)
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_email);
 CREATE INDEX IF NOT EXISTS idx_audits_agent ON call_audits(agent_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_status_history_ticket_id ON ticket_status_history(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_lead_history_lead_id ON lead_history(lead_id);

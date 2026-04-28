@@ -125,11 +125,17 @@ async function filterValidColumns(tableName, data) {
 export { filterValidColumns, getTableColumns };
 
 export function createCrudRouter(tableName, options = {}) {
-  const { 
-    searchFields = ['name'], 
+  const {
+    searchFields = ['name'],
     defaultSort = '-created_at',
-    allowedFilters = []
+    allowedFilters = [],
+    // SQL fragment(s) — without `WHERE` — that should always be ANDed onto
+    // list/filter queries. Used e.g. by `notifications` to hide rows whose
+    // `in_app_visible` flag is false even when the request comes through the
+    // generic entity route.
+    extraWhere = [],
   } = options;
+  const baseConditions = Array.isArray(extraWhere) ? extraWhere : [extraWhere];
 
   return {
     async list(req, res) {
@@ -138,7 +144,7 @@ export function createCrudRouter(tableName, options = {}) {
         
         let sql = `SELECT * FROM ${tableName}`;
         const params = [];
-        const conditions = [];
+        const conditions = [...baseConditions];
         
         if (search && searchFields.length > 0) {
           const searchConditions = searchFields.map((field, i) => {
@@ -270,16 +276,19 @@ export function createCrudRouter(tableName, options = {}) {
         const filters = convertKeysToSnake(req.body);
         const keys = Object.keys(filters);
         const values = Object.values(filters);
-        
+
         let sql = `SELECT * FROM ${tableName}`;
-        
-        if (keys.length > 0) {
-          const conditions = keys.map((key, i) => `${key} = $${i + 1}`).join(' AND ');
-          sql += ` WHERE ${conditions}`;
+
+        const conditions = [...baseConditions];
+        for (const [i, key] of keys.entries()) {
+          conditions.push(`${key} = $${i + 1}`);
         }
-        
+        if (conditions.length > 0) {
+          sql += ` WHERE ${conditions.join(' AND ')}`;
+        }
+
         sql += ` ORDER BY created_at DESC`;
-        
+
         const result = await query(sql, values);
         res.json(result.rows.map(convertKeysToCamel));
       } catch (error) {

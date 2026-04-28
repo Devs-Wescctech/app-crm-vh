@@ -205,7 +205,11 @@ router.post('/check-notifications', authMiddleware, async (req, res) => {
     const { user_email } = req.body;
     
     const result = await query(
-      'SELECT * FROM notifications WHERE user_email = $1 AND read = false ORDER BY created_at DESC LIMIT 50',
+      `SELECT * FROM notifications
+       WHERE user_email = $1
+         AND read = false
+         AND COALESCE(in_app_visible, true) = true
+       ORDER BY created_at DESC LIMIT 50`,
       [user_email]
     );
     
@@ -213,6 +217,80 @@ router.post('/check-notifications', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error checking notifications:', error);
     res.status(500).json({ message: error.message });
+  }
+});
+
+// =====================================================================
+// Web Push subscription lifecycle. The frontend (PushManager.subscribe)
+// posts the subscription object here once per device. The backend uses
+// `web-push` to deliver pushes to whatever endpoints the user has registered
+// (see backend/src/services/notificationService.js#sendPushNotification).
+// =====================================================================
+router.get('/push/vapid-public-key', authMiddleware, async (req, res) => {
+  const key = process.env.VAPID_PUBLIC_KEY || '';
+  res.json({ publicKey: key, configured: Boolean(key) });
+});
+
+router.post('/push/subscribe', authMiddleware, async (req, res) => {
+  try {
+    const userEmail = req.user?.email || req.user?.userEmail;
+    if (!userEmail) {
+      return res.status(401).json({ success: false, error: 'unauthenticated' });
+    }
+    const { endpoint, keys, userAgent, user_agent } = req.body || {};
+    const p256dh = keys?.p256dh;
+    const auth = keys?.auth;
+    if (!endpoint || !p256dh || !auth) {
+      return res.status(400).json({ success: false, error: 'subscription requires endpoint and keys.{p256dh,auth}' });
+    }
+    // Bound the payload sizes before they hit the DB. Real Web Push values are
+    // tiny (URL ≤ ~512 chars, p256dh ≈ 88 chars, auth ≈ 24 chars) so anything
+    // wildly bigger is malformed or hostile.
+    if (typeof endpoint !== 'string' || endpoint.length > 2048 ||
+        typeof p256dh !== 'string' || p256dh.length > 256 ||
+        typeof auth !== 'string' || auth.length > 128) {
+      return res.status(400).json({ success: false, error: 'subscription payload exceeds allowed sizes' });
+    }
+    const ua = (userAgent || user_agent || req.get('user-agent') || '').toString().slice(0, 500);
+    // Upsert by endpoint so re-subscribing the same browser doesn't create dupes
+    // and re-binds the endpoint to the currently logged-in user.
+    await query(
+      `INSERT INTO push_subscriptions (user_email, endpoint, p256dh_key, auth_key, user_agent, last_used_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (endpoint) DO UPDATE SET
+         user_email = EXCLUDED.user_email,
+         p256dh_key = EXCLUDED.p256dh_key,
+         auth_key = EXCLUDED.auth_key,
+         user_agent = COALESCE(EXCLUDED.user_agent, push_subscriptions.user_agent),
+         last_used_at = NOW(),
+         last_error = NULL,
+         last_error_at = NULL`,
+      [userEmail, endpoint, p256dh, auth, ua || null]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Push] subscribe failed:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/push/unsubscribe', authMiddleware, async (req, res) => {
+  try {
+    const userEmail = req.user?.email || req.user?.userEmail;
+    const { endpoint } = req.body || {};
+    if (!endpoint) {
+      return res.status(400).json({ success: false, error: 'endpoint is required' });
+    }
+    // Scope deletion to the caller so a leaked endpoint can't be used to
+    // unsubscribe someone else.
+    await query(
+      `DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_email = $2`,
+      [endpoint, userEmail]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Push] unsubscribe failed:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
