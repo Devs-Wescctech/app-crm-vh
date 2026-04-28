@@ -2217,10 +2217,23 @@ router.post('/visits', authMiddleware, async (req, res) => {
  * pois o objetivo do relatório é auditoria de comissão histórica. O front
  * é quem refina cada período mostrado (e o intervalo de datas).
  */
+const LEAD_PJ_PERIODS_DEFAULT_PAGE_SIZE = 50;
+const LEAD_PJ_PERIODS_MAX_PAGE_SIZE = 500;
+
 router.get('/reports/lead-pj-agent-periods', authMiddleware, async (req, res) => {
   try {
     const visibleIds = await resolveVisibleAgentIds(req.user?.id);
     const { stage, agent_id: agentId, team_id: teamId } = req.query;
+
+    const rawPage = parseInt(req.query.page, 10);
+    const rawPageSize = parseInt(req.query.page_size ?? req.query.pageSize, 10);
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+    const pageSize = Math.min(
+      LEAD_PJ_PERIODS_MAX_PAGE_SIZE,
+      Number.isFinite(rawPageSize) && rawPageSize > 0
+        ? rawPageSize
+        : LEAD_PJ_PERIODS_DEFAULT_PAGE_SIZE
+    );
 
     const whereParts = [];
     const params = [];
@@ -2228,7 +2241,15 @@ router.get('/reports/lead-pj-agent-periods', authMiddleware, async (req, res) =>
     if (visibleIds === null) {
       // sem restrição
     } else if (visibleIds.length === 0) {
-      return res.json({ leads: [], activities: [] });
+      return res.json({
+        leads: [],
+        activities: [],
+        page,
+        pageSize,
+        total: 0,
+        totalPages: 0,
+        hasMore: false,
+      });
     } else {
       const placeholders = visibleIds.map((_, i) => `$${params.length + i + 1}`).join(',');
       whereParts.push(`l.agent_id::text IN (${placeholders})`);
@@ -2281,36 +2302,63 @@ router.get('/reports/lead-pj-agent-periods', authMiddleware, async (req, res) =>
     }
 
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const countSql = `SELECT COUNT(*)::int AS total FROM leads_pj l ${whereSql}`;
+    const countResult = await query(countSql, params);
+    const total = countResult.rows[0]?.total || 0;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+    const offset = (page - 1) * pageSize;
+
+    if (total === 0 || offset >= total) {
+      return res.json({
+        leads: [],
+        activities: [],
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasMore: false,
+      });
+    }
+
+    const limitParamIdx = params.length + 1;
+    const offsetParamIdx = params.length + 2;
     const leadsSql = `
       SELECT l.id, l.razao_social, l.nome_fantasia, l.cnpj, l.stage, l.value,
              l.monthly_value, l.agent_id, l.created_at, l.updated_at, l.concluded
       FROM leads_pj l
       ${whereSql}
-      ORDER BY l.created_at DESC
+      ORDER BY l.created_at DESC, l.id DESC
+      LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
     `;
-    const leadsResult = await query(leadsSql, params);
+    const leadsResult = await query(leadsSql, [...params, pageSize, offset]);
     const leads = leadsResult.rows;
 
-    if (leads.length === 0) {
-      return res.json({ leads: [], activities: [] });
+    let activities = [];
+    if (leads.length > 0) {
+      const leadIdPlaceholders = leads.map((_, i) => `$${i + 1}`).join(',');
+      const activitiesSql = `
+        SELECT id, lead_id, type, created_at, scheduled_at, assigned_to,
+               created_by, metadata, description
+        FROM activities_pj
+        WHERE type = 'agent_change' AND lead_id IN (${leadIdPlaceholders})
+        ORDER BY created_at ASC
+      `;
+      const activitiesResult = await query(
+        activitiesSql,
+        leads.map(l => l.id)
+      );
+      activities = activitiesResult.rows;
     }
-
-    const leadIdPlaceholders = leads.map((_, i) => `$${i + 1}`).join(',');
-    const activitiesSql = `
-      SELECT id, lead_id, type, created_at, scheduled_at, assigned_to,
-             created_by, metadata, description
-      FROM activities_pj
-      WHERE type = 'agent_change' AND lead_id IN (${leadIdPlaceholders})
-      ORDER BY created_at ASC
-    `;
-    const activitiesResult = await query(
-      activitiesSql,
-      leads.map(l => l.id)
-    );
 
     res.json({
       leads: leads.map(convertKeysToCamel),
-      activities: activitiesResult.rows.map(convertKeysToCamel),
+      activities: activities.map(convertKeysToCamel),
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasMore: page < totalPages,
     });
   } catch (error) {
     console.error('Error in lead-pj-agent-periods report:', error);

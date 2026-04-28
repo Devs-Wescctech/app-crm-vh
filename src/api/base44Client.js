@@ -219,13 +219,43 @@ export const base44 = {
   },
   
   reports: {
-    leadPjAgentPeriods: async ({ stage, agentId, teamId } = {}) => {
+    leadPjAgentPeriods: async ({ stage, agentId, teamId, page, pageSize } = {}) => {
       const params = new URLSearchParams();
       if (stage) params.append('stage', stage);
       if (agentId) params.append('agent_id', agentId);
       if (teamId) params.append('team_id', teamId);
+      if (page) params.append('page', String(page));
+      if (pageSize) params.append('page_size', String(pageSize));
       const qs = params.toString();
       return fetchAPI(`/reports/lead-pj-agent-periods${qs ? `?${qs}` : ''}`);
+    },
+    leadPjAgentPeriodsAll: async ({ stage, agentId, teamId, pageSize = 200, onProgress } = {}) => {
+      const allLeads = [];
+      const allActivities = [];
+      let page = 1;
+      let total = 0;
+      let totalPages = 1;
+      // Loop until backend says no more pages.
+      // Cap iterations defensively to avoid infinite loops.
+      for (let i = 0; i < 1000; i += 1) {
+        const data = await base44.reports.leadPjAgentPeriods({
+          stage,
+          agentId,
+          teamId,
+          page,
+          pageSize,
+        });
+        if (Array.isArray(data?.leads)) allLeads.push(...data.leads);
+        if (Array.isArray(data?.activities)) allActivities.push(...data.activities);
+        total = data?.total ?? allLeads.length;
+        totalPages = data?.totalPages ?? 1;
+        if (typeof onProgress === 'function') {
+          onProgress({ page, totalPages, loaded: allLeads.length, total });
+        }
+        if (!data?.hasMore) break;
+        page += 1;
+      }
+      return { leads: allLeads, activities: allActivities, total, totalPages };
     },
   },
 

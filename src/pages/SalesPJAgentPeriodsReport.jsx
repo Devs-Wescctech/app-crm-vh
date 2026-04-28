@@ -1,12 +1,22 @@
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   History,
+  Loader2,
   ShieldX,
   UserCog,
   Users,
@@ -82,12 +92,91 @@ const csvCell = (value) => {
   return `"${v.replace(/"/g, '""')}"`;
 };
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
+/**
+ * Aggregates a list of derived periods (rows) into per-agent commission
+ * summaries — used both by the on-screen card (current page) and by the
+ * CSV export (full dataset across all pages).
+ */
+function computeAgentSummary(rowsList) {
+  const buckets = new Map();
+  let totalDays = 0;
+
+  rowsList.forEach((r) => {
+    const agentId = r.period.agentId || `__none__:${r.period.agentName}`;
+    const days = r.overlapDays;
+    totalDays += days;
+
+    let bucket = buckets.get(agentId);
+    if (!bucket) {
+      bucket = {
+        agentId: r.period.agentId || null,
+        agentName: r.period.agentName || "Sem agente",
+        teamName: r.teamName,
+        teamId: r.teamId || null,
+        totalDays: 0,
+        leadIds: new Set(),
+        leadValues: new Map(),
+      };
+      buckets.set(agentId, bucket);
+    }
+
+    bucket.totalDays += days;
+    bucket.leadIds.add(r.leadId);
+    if (!bucket.leadValues.has(r.leadId)) {
+      bucket.leadValues.set(r.leadId, r.leadValue || 0);
+    }
+  });
+
+  const summary = Array.from(buckets.values()).map((b) => {
+    const totalValue = Array.from(b.leadValues.values()).reduce(
+      (acc, v) => acc + (v || 0),
+      0
+    );
+    return {
+      agentId: b.agentId,
+      agentName: b.agentName,
+      teamName: b.teamName,
+      teamId: b.teamId,
+      leadCount: b.leadIds.size,
+      totalDays: b.totalDays,
+      totalValue,
+      percent: totalDays > 0 ? (b.totalDays / totalDays) * 100 : 0,
+    };
+  });
+
+  summary.sort((a, b) => b.totalDays - a.totalDays);
+
+  const uniqueLeadValues = new Map();
+  rowsList.forEach((r) => {
+    if (!uniqueLeadValues.has(r.leadId)) {
+      uniqueLeadValues.set(r.leadId, r.leadValue || 0);
+    }
+  });
+
+  const totals = {
+    uniqueLeads: uniqueLeadValues.size,
+    totalDays: summary.reduce((acc, s) => acc + s.totalDays, 0),
+    totalValue: Array.from(uniqueLeadValues.values()).reduce(
+      (acc, v) => acc + (v || 0),
+      0
+    ),
+  };
+
+  return { summary, totals };
+}
+
 export default function SalesPJAgentPeriodsReport() {
   const [selectedPeriod, setSelectedPeriod] = useState("all");
   const [dateRange, setDateRange] = useState({ from: null, to: null });
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedStage, setSelectedStage] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(null);
 
   const { data: user } = useQuery({
     queryKey: ["currentUser"],
@@ -139,6 +228,11 @@ export default function SalesPJAgentPeriodsReport() {
     );
   }, [salesAgents, selectedTeam]);
 
+  // Reset to page 1 whenever a server-side filter changes.
+  useEffect(() => {
+    setPage(1);
+  }, [selectedAgent, selectedStage, selectedTeam, pageSize]);
+
   const { data, isLoading, isFetching } = useQuery({
     queryKey: [
       "lead-pj-agent-periods-report",
@@ -146,18 +240,33 @@ export default function SalesPJAgentPeriodsReport() {
       selectedAgent,
       selectedStage,
       selectedTeam,
+      page,
+      pageSize,
     ],
     queryFn: () =>
       base44.reports.leadPjAgentPeriods({
         stage: selectedStage || undefined,
         agentId: selectedAgent || undefined,
         teamId: selectedTeam || undefined,
+        page,
+        pageSize,
       }),
     enabled: hasPermission && !!user,
+    placeholderData: keepPreviousData,
   });
 
   const leads = data?.leads || [];
   const activities = data?.activities || [];
+  const totalLeads = data?.total ?? leads.length;
+  const totalPages = data?.totalPages ?? (leads.length > 0 ? 1 : 0);
+  const safePage = Math.max(1, Math.min(page, totalPages || 1));
+
+  // Snap back if total shrinks (e.g. after filters change).
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const teamMap = useMemo(() => {
     const map = {};
@@ -245,73 +354,7 @@ export default function SalesPJAgentPeriodsReport() {
     selectedTeam,
   ]);
 
-  const agentSummary = useMemo(() => {
-    const buckets = new Map();
-    let totalDays = 0;
-
-    rows.forEach((r) => {
-      const agentId = r.period.agentId || `__none__:${r.period.agentName}`;
-      const days = r.overlapDays;
-      totalDays += days;
-
-      let bucket = buckets.get(agentId);
-      if (!bucket) {
-        bucket = {
-          agentId: r.period.agentId || null,
-          agentName: r.period.agentName || "Sem agente",
-          teamName: r.teamName,
-          teamId: r.teamId || null,
-          totalDays: 0,
-          leadIds: new Set(),
-          leadValues: new Map(),
-        };
-        buckets.set(agentId, bucket);
-      }
-
-      bucket.totalDays += days;
-      bucket.leadIds.add(r.leadId);
-      if (!bucket.leadValues.has(r.leadId)) {
-        bucket.leadValues.set(r.leadId, r.leadValue || 0);
-      }
-    });
-
-    const summary = Array.from(buckets.values()).map((b) => {
-      const totalValue = Array.from(b.leadValues.values()).reduce(
-        (acc, v) => acc + (v || 0),
-        0
-      );
-      return {
-        agentId: b.agentId,
-        agentName: b.agentName,
-        teamName: b.teamName,
-        teamId: b.teamId,
-        leadCount: b.leadIds.size,
-        totalDays: b.totalDays,
-        totalValue,
-        percent: totalDays > 0 ? (b.totalDays / totalDays) * 100 : 0,
-      };
-    });
-
-    summary.sort((a, b) => b.totalDays - a.totalDays);
-
-    const uniqueLeadValues = new Map();
-    rows.forEach((r) => {
-      if (!uniqueLeadValues.has(r.leadId)) {
-        uniqueLeadValues.set(r.leadId, r.leadValue || 0);
-      }
-    });
-
-    const totals = {
-      uniqueLeads: uniqueLeadValues.size,
-      totalDays: summary.reduce((acc, s) => acc + s.totalDays, 0),
-      totalValue: Array.from(uniqueLeadValues.values()).reduce(
-        (acc, v) => acc + (v || 0),
-        0
-      ),
-    };
-
-    return { summary, totals };
-  }, [rows]);
+  const agentSummary = useMemo(() => computeAgentSummary(rows), [rows]);
 
   const stats = useMemo(() => {
     const leadIds = new Set();
@@ -333,40 +376,100 @@ export default function SalesPJAgentPeriodsReport() {
     setSelectedAgent(null);
     setSelectedStage(null);
     setSelectedTeam(null);
+    setPage(1);
   };
 
-  const handleExport = () => {
-    if (rows.length === 0) {
-      alert("Nenhum período para exportar");
+  const buildExportRows = (allLeads, allActivities) => {
+    const activitiesByLead = new Map();
+    allActivities.forEach((a) => {
+      const leadId = a.leadId || a.lead_id;
+      if (!leadId) return;
+      const list = activitiesByLead.get(leadId) || [];
+      list.push(a);
+      activitiesByLead.set(leadId, list);
+    });
+
+    const result = [];
+    allLeads.forEach((lead) => {
+      const leadActivities = activitiesByLead.get(lead.id) || [];
+      const periods = deriveLeadAgentPeriods(lead, leadActivities, allAgents);
+      periods.forEach((period, idx) => {
+        if (!periodOverlapsRange(period, fromDate, toDate)) return;
+        if (selectedAgent && period.agentId !== selectedAgent) return;
+        const agent = period.agentId ? agentMap[period.agentId] : null;
+        const teamId = agent?.teamId || agent?.team_id || null;
+        const team = teamId ? teamMap[teamId] : null;
+        if (selectedTeam && String(teamId) !== String(selectedTeam)) return;
+        const overlapMs = getPeriodOverlapMs(period, fromDate, toDate);
+        result.push({
+          key: `${lead.id}-${idx}`,
+          leadId: lead.id,
+          leadCnpj: lead.cnpj || "",
+          leadName:
+            lead.nomeFantasia || lead.razaoSocial || lead.cnpj || "Sem nome",
+          leadStage: lead.stage,
+          leadValue: lead.value || lead.monthlyValue || 0,
+          period,
+          agent,
+          teamId,
+          teamName: team?.name || "—",
+          overlapMs,
+          overlapDays: overlapMs / MS_PER_DAY,
+        });
+      });
+    });
+    return result;
+  };
+
+  const handleExport = async () => {
+    if (totalLeads === 0) {
+      alert("Nenhum lead para exportar");
       return;
     }
 
-    const periodLabel =
-      dateRange?.from && dateRange?.to
-        ? `${format(dateRange.from, "dd/MM/yyyy", {
-            locale: ptBR,
-          })} a ${format(dateRange.to, "dd/MM/yyyy", { locale: ptBR })}`
-        : "Todo o período";
+    setIsExporting(true);
+    setExportProgress({ page: 0, totalPages: 0 });
 
-    const header = [
-      "Lead",
-      "CNPJ",
-      "Estágio do Lead",
-      "Valor do Lead",
-      "Agente Responsável",
-      "Filial/Equipe",
-      "Desde",
-      "Até",
-      "Duração",
-      "Reatribuído por",
-      "Status do Período",
-    ];
+    try {
+      const all = await base44.reports.leadPjAgentPeriodsAll({
+        stage: selectedStage || undefined,
+        agentId: selectedAgent || undefined,
+        teamId: selectedTeam || undefined,
+        pageSize: 200,
+        onProgress: (info) => setExportProgress(info),
+      });
 
-    const csvRows = rows.map((r) => {
-      const lead = leads.find((l) => l.id === r.leadId);
-      return [
+      const exportRows = buildExportRows(all.leads, all.activities);
+
+      if (exportRows.length === 0) {
+        alert("Nenhum período para exportar");
+        return;
+      }
+
+      const periodLabel =
+        dateRange?.from && dateRange?.to
+          ? `${format(dateRange.from, "dd/MM/yyyy", {
+              locale: ptBR,
+            })} a ${format(dateRange.to, "dd/MM/yyyy", { locale: ptBR })}`
+          : "Todo o período";
+
+      const header = [
+        "Lead",
+        "CNPJ",
+        "Estágio do Lead",
+        "Valor do Lead",
+        "Agente Responsável",
+        "Filial/Equipe",
+        "Desde",
+        "Até",
+        "Duração",
+        "Reatribuído por",
+        "Status do Período",
+      ];
+
+      const csvRows = exportRows.map((r) => [
         r.leadName,
-        lead?.cnpj || "",
+        r.leadCnpj,
         getStageLabel(r.leadStage, "pj"),
         r.leadValue || 0,
         r.period.agentName,
@@ -376,62 +479,76 @@ export default function SalesPJAgentPeriodsReport() {
         formatDuration(r.period.from, r.period.to) || "",
         r.period.reassignedByName || "",
         r.period.isCurrent ? "Atual" : "Encerrado",
+      ]);
+
+      const exportSummary = computeAgentSummary(exportRows);
+
+      const summaryHeader = [
+        "Vendedor",
+        "Filial/Equipe",
+        "Nº de Leads",
+        "Dias de Responsabilidade",
+        "Valor Total dos Leads (R$)",
+        "% do Total (dias)",
       ];
-    });
 
-    const summaryHeader = [
-      "Vendedor",
-      "Filial/Equipe",
-      "Nº de Leads",
-      "Dias de Responsabilidade",
-      "Valor Total dos Leads (R$)",
-      "% do Total (dias)",
-    ];
+      const summaryRows = exportSummary.summary.map((s) => [
+        s.agentName,
+        s.teamName,
+        s.leadCount,
+        formatDays(s.totalDays),
+        (s.totalValue || 0).toFixed(2).replace(".", ","),
+        formatPercent(s.percent),
+      ]);
 
-    const summaryRows = agentSummary.summary.map((s) => [
-      s.agentName,
-      s.teamName,
-      s.leadCount,
-      formatDays(s.totalDays),
-      (s.totalValue || 0).toFixed(2).replace(".", ","),
-      formatPercent(s.percent),
-    ]);
+      const summaryTotalsRow = [
+        "TOTAL",
+        "",
+        exportSummary.totals.uniqueLeads,
+        formatDays(exportSummary.totals.totalDays),
+        (exportSummary.totals.totalValue || 0).toFixed(2).replace(".", ","),
+        "100,0%",
+      ];
 
-    const summaryTotalsRow = [
-      "TOTAL",
-      "",
-      agentSummary.totals.uniqueLeads,
-      formatDays(agentSummary.totals.totalDays),
-      (agentSummary.totals.totalValue || 0).toFixed(2).replace(".", ","),
-      "100,0%",
-    ];
+      const csv = [
+        ["RELATÓRIO DE PERÍODOS DE RESPONSABILIDADE - LEADS PJ"],
+        [`Período: ${periodLabel}`],
+        [
+          `Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm", {
+            locale: ptBR,
+          })}`,
+        ],
+        [""],
+        ["RESUMO POR VENDEDOR"],
+        summaryHeader,
+        ...summaryRows,
+        summaryTotalsRow,
+        [""],
+        ["DETALHAMENTO POR PERÍODO"],
+        header,
+        ...csvRows,
+      ]
+        .map((row) => row.map(csvCell).join(";"))
+        .join("\n");
 
-    const csv = [
-      ["RELATÓRIO DE PERÍODOS DE RESPONSABILIDADE - LEADS PJ"],
-      [`Período: ${periodLabel}`],
-      [`Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm", { locale: ptBR })}`],
-      [""],
-      ["RESUMO POR VENDEDOR"],
-      summaryHeader,
-      ...summaryRows,
-      summaryTotalsRow,
-      [""],
-      ["DETALHAMENTO POR PERÍODO"],
-      header,
-      ...csvRows,
-    ]
-      .map((row) => row.map(csvCell).join(";"))
-      .join("\n");
-
-    const blob = new Blob(["\ufeff" + csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `relatorio_periodos_responsabilidade_pj_${new Date()
-      .toISOString()
-      .split("T")[0]}.csv`;
-    link.click();
+      const blob = new Blob(["\ufeff" + csv], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `relatorio_periodos_responsabilidade_pj_${new Date()
+        .toISOString()
+        .split("T")[0]}.csv`;
+      link.click();
+    } catch (err) {
+      console.error("Erro ao exportar relatório:", err);
+      alert(
+        "Não foi possível exportar o relatório. Tente novamente em instantes."
+      );
+    } finally {
+      setIsExporting(false);
+      setExportProgress(null);
+    }
   };
 
   if (!hasPermission) {
@@ -468,10 +585,21 @@ export default function SalesPJAgentPeriodsReport() {
         <Button
           onClick={handleExport}
           className="bg-green-600 hover:bg-green-700"
-          disabled={rows.length === 0}
+          disabled={isExporting || totalLeads === 0}
         >
-          <Download className="w-4 h-4 mr-2" />
-          Exportar CSV
+          {isExporting ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              {exportProgress && exportProgress.totalPages > 0
+                ? `Exportando… ${exportProgress.loaded}/${exportProgress.total}`
+                : "Exportando…"}
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4 mr-2" />
+              Exportar CSV
+            </>
+          )}
         </Button>
       </div>
 
@@ -502,7 +630,7 @@ export default function SalesPJAgentPeriodsReport() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Períodos
+                  Períodos (nesta página)
                 </p>
                 <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
                   {stats.totalRows}
@@ -518,9 +646,14 @@ export default function SalesPJAgentPeriodsReport() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Leads</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Leads (total filtrado)
+                </p>
                 <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">
-                  {stats.leads}
+                  {totalLeads}
+                </p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                  {stats.leads} na página atual
                 </p>
               </div>
               <div className="p-3 bg-emerald-100 dark:bg-emerald-950 rounded-xl">
@@ -534,7 +667,7 @@ export default function SalesPJAgentPeriodsReport() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Agentes envolvidos
+                  Agentes envolvidos (nesta página)
                 </p>
                 <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">
                   {stats.agents}
@@ -555,8 +688,9 @@ export default function SalesPJAgentPeriodsReport() {
             Resumo por vendedor
           </CardTitle>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Agregado dos períodos filtrados — útil para distribuir comissão
-            proporcional ao tempo de posse de cada lead.
+            Agregado dos períodos da página atual — útil para distribuir
+            comissão proporcional ao tempo de posse de cada lead. Para o
+            cálculo completo em todas as páginas, exporte o CSV.
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -696,7 +830,7 @@ export default function SalesPJAgentPeriodsReport() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {isLoading || isFetching ? (
+                {isLoading ? (
                   <tr>
                     <td
                       colSpan={6}
@@ -780,6 +914,66 @@ export default function SalesPJAgentPeriodsReport() {
               </tbody>
             </table>
           </div>
+
+          {totalLeads > 0 && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-t border-gray-200 dark:border-gray-800 text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span>
+                  Mostrando leads {(safePage - 1) * pageSize + 1}–
+                  {Math.min(safePage * pageSize, totalLeads)} de {totalLeads}
+                </span>
+                {isFetching && !isLoading && (
+                  <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    atualizando…
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500">Por página:</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v))}
+                >
+                  <SelectTrigger className="h-8 w-[80px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safePage <= 1 || isFetching}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Anterior
+                </Button>
+                <span className="text-sm text-gray-700 dark:text-gray-300 px-2">
+                  Página {safePage} de {totalPages || 1}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safePage >= (totalPages || 1) || isFetching}
+                  onClick={() =>
+                    setPage((p) => Math.min(totalPages || 1, p + 1))
+                  }
+                  className="gap-1"
+                >
+                  Próxima
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
