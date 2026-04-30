@@ -4963,6 +4963,31 @@ router.get(
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+      // Trend condition set for "Lead/Mês": ignores mes/ano (otherwise the
+      // 12-month line would have 11 forced-zero months whenever the user
+      // selects a specific month), but still respects produto + tabulacao.
+      const trendConditions = [];
+      const trendParams = [];
+      let trendIdx = 1;
+      if (produto) {
+        trendConditions.push(
+          `EXISTS (SELECT 1 FROM lead_pj_proposal_items i WHERE i.lead_id = l.id AND i.product_id = $${trendIdx++})`
+        );
+        trendParams.push(produto);
+      }
+      if (tabulacao) {
+        const stages = Object.entries(TABULACAO_FROM_STAGE)
+          .filter(([, label]) => label === tabulacao)
+          .map(([stage]) => stage);
+        if (stages.length === 0) {
+          trendConditions.push('1 = 0');
+        } else {
+          const placeholders = stages.map(() => `$${trendIdx++}`).join(', ');
+          trendConditions.push(`l.stage IN (${placeholders})`);
+          trendParams.push(...stages);
+        }
+      }
+
       // 1) total leads + range
       const totalRes = await query(
         `SELECT COUNT(*)::int AS total,
@@ -5013,18 +5038,25 @@ router.get(
         }))
         .sort((a, b) => b.value - a.value);
 
-      // 4) Produto — count distinct leads grouped by product
+      // 4) Produto — count distinct leads grouped by product.
+      // When a specific produto filter is active, narrow the join so the
+      // chart shows only that product (not all products attached to the
+      // matching leads).
+      const produtoJoinFilter = produto
+        ? `AND i.product_id = $${idx++}`
+        : '';
+      const produtoParams = produto ? [...params, produto] : params;
       const produtoRes = await query(
         `SELECT COALESCE(p.name, 'Sem Produto') AS label,
                 COUNT(DISTINCT l.id)::int AS qty
          FROM leads_pj l
-         LEFT JOIN lead_pj_proposal_items i ON i.lead_id = l.id
+         LEFT JOIN lead_pj_proposal_items i ON i.lead_id = l.id ${produtoJoinFilter}
          LEFT JOIN products p ON p.id = i.product_id
          ${where}
          GROUP BY p.name
          ORDER BY qty DESC
          LIMIT 20`,
-        params
+        produtoParams
       );
       const produtoArr = produtoRes.rows.map((row) => ({
         label: row.label,
@@ -5096,12 +5128,28 @@ router.get(
         value: row.qty,
       }));
 
-      // 9) Lead/Mês — last 12 months from MAX(created_at) or NOW()
+      // 9) Lead/Mês — rolling 12-month window. Anchored to the selected
+      // year (Dec/ano) when `ano` is provided, otherwise to the current
+      // month. Ignores `mes`/`ano` row-level filters (uses `trendConditions`)
+      // so the trend stays meaningful even when the user filters by a
+      // single month.
+      const anchorIdx = trendIdx; // placeholder slot for anchor month-start
+      const trendOnClause = trendConditions.length
+        ? 'AND ' + trendConditions.join(' AND ')
+        : '';
+      let anchorExpr;
+      const mesParams = [...trendParams];
+      if (ano && ano >= 2000 && ano <= 2100) {
+        anchorExpr = `make_date($${anchorIdx}, 12, 1)`;
+        mesParams.push(ano);
+      } else {
+        anchorExpr = `date_trunc('month', NOW())::date`;
+      }
       const mesRes = await query(
         `WITH months AS (
            SELECT generate_series(
-             date_trunc('month', NOW()) - INTERVAL '11 months',
-             date_trunc('month', NOW()),
+             ${anchorExpr} - INTERVAL '11 months',
+             ${anchorExpr},
              INTERVAL '1 month'
            ) AS month_start
          )
@@ -5110,10 +5158,10 @@ router.get(
          FROM months m
          LEFT JOIN leads_pj l
            ON date_trunc('month', l.created_at) = m.month_start
-           ${where ? 'AND ' + conditions.join(' AND ') : ''}
+           ${trendOnClause}
          GROUP BY m.month_start
          ORDER BY m.month_start ASC`,
-        params
+        mesParams
       );
       const leadPorMesArr = mesRes.rows.map((row) => ({
         month: row.month,
