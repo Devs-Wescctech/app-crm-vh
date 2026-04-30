@@ -226,10 +226,17 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     setOptions(parsed);
   }, [savedJson, dirty]);
 
+  // Task #67 — comparação case-insensitive para evitar que o usuário
+  // adicione "Prospecção" / "prospecção" / "PROSPECÇÃO" como entradas
+  // distintas (e, no caso oposto, para impedir um falso erro "já existe"
+  // quando o casing está realmente diferente).
+  const isDuplicate = (list, candidate) =>
+    list.some((opt) => String(opt).trim().toLocaleLowerCase('pt-BR') === candidate.toLocaleLowerCase('pt-BR'));
+
   const handleAdd = () => {
     const trimmed = newOption.trim();
     if (!trimmed) return;
-    if (options.includes(trimmed)) {
+    if (isDuplicate(options, trimmed)) {
       toast.error('Esta opção já existe');
       return;
     }
@@ -252,7 +259,7 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     let toSave = options;
     const pending = newOption.trim();
     if (pending) {
-      if (options.includes(pending)) {
+      if (isDuplicate(options, pending)) {
         toast.error('Esta opção já existe');
         return;
       }
@@ -267,11 +274,22 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     }
     setSaving(true);
     try {
+      const persistedJson = JSON.stringify(toSave);
       await onSave.mutateAsync({
         key: settingKey,
-        value: JSON.stringify(toSave),
+        value: persistedJson,
         type: 'json',
       });
+      // Task #67 — força a sincronia do estado local com o que acabamos de
+      // persistir. Antes dependíamos exclusivamente do cache do React Query
+      // refetcher → savedJson → useEffect → setOptions. Se o refetch demorasse
+      // ou houvesse uma corrida com outro componente que invalidasse o cache
+      // (ex.: trocar de aba imediatamente após Salvar), o usuário podia ver
+      // o dropdown "voltando" para o valor antigo e achar que o save falhou.
+      // Atualizar o ref + options aqui torna o save idempotente sem precisar
+      // esperar o ciclo do cache.
+      lastSyncedJsonRef.current = persistedJson;
+      setOptions(toSave);
       setDirty(false);
     } catch (error) {
       // erro já é tratado pelo onError da mutation

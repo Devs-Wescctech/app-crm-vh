@@ -146,13 +146,20 @@ export default function LeadPJDetail() {
     refetchOnMount: 'always',
   });
 
-  const INTEREST_OPTIONS = (() => {
-    const setting = systemSettings.find(s => s.settingKey === 'interest_options_pj' || s.setting_key === 'interest_options_pj');
+  // Task #67 — leitura defensiva: se o setting existir mas estiver vazio
+  // (`'[]'`), cai pros defaults para o dropdown nunca ficar sem opções.
+  const INTEREST_OPTIONS = useMemo(() => {
+    const setting = systemSettings.find(
+      (s) => s.settingKey === 'interest_options_pj' || s.setting_key === 'interest_options_pj'
+    );
     if (setting) {
-      try { return JSON.parse(setting.settingValue || setting.setting_value); } catch {}
+      try {
+        const parsed = JSON.parse(setting.settingValue ?? setting.setting_value ?? '');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
     }
     return DEFAULT_INTEREST_OPTIONS_PJ;
-  })();
+  }, [systemSettings]);
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ['leadPJ', leadId],

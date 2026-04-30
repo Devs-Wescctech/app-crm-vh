@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -45,21 +45,34 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
     refetchOnMount: 'always',
   });
 
-  const INTEREST_OPTIONS = (() => {
-    const setting = systemSettings.find(s => s.settingKey === 'interest_options_pj' || s.setting_key === 'interest_options_pj');
-    if (setting) {
-      try { return JSON.parse(setting.settingValue || setting.setting_value); } catch {}
-    }
-    return DEFAULT_INTEREST_OPTIONS_PJ;
-  })();
+  // Task #67 — leitura defensiva das opções customizáveis. Antes:
+  //  - se o setting existisse mas tivesse JSON inválido, caía silenciosamente
+  //    nos defaults (OK), mas
+  //  - se tivesse um array vazio salvo, o dropdown ficava SEM nenhuma opção,
+  //    impedindo o cadastro. Agora um array vazio também cai pros defaults.
+  // Também movi para useMemo pra evitar reparse a cada render.
+  const readOptionsSetting = (key, defaults) => {
+    const setting = systemSettings.find(
+      (s) => s.settingKey === key || s.setting_key === key
+    );
+    if (!setting) return defaults;
+    const raw = setting.settingValue ?? setting.setting_value ?? '';
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {}
+    return defaults;
+  };
 
-  const SOURCE_OPTIONS = (() => {
-    const setting = systemSettings.find(s => s.settingKey === 'source_options_pj' || s.setting_key === 'source_options_pj');
-    if (setting) {
-      try { return JSON.parse(setting.settingValue || setting.setting_value); } catch {}
-    }
-    return DEFAULT_SOURCE_OPTIONS_PJ;
-  })();
+  const INTEREST_OPTIONS = useMemo(
+    () => readOptionsSetting('interest_options_pj', DEFAULT_INTEREST_OPTIONS_PJ),
+    [systemSettings]
+  );
+
+  const SOURCE_OPTIONS = useMemo(
+    () => readOptionsSetting('source_options_pj', DEFAULT_SOURCE_OPTIONS_PJ),
+    [systemSettings]
+  );
   const [formData, setFormData] = useState({
     cnpj: "",
     razaoSocial: "",
