@@ -85,6 +85,20 @@ const DEFAULT_INTEREST_OPTIONS_PJ = [
   "Outro",
 ];
 
+// Task #67 — espelha os defaults de QuickLeadPJForm para a edição
+// no detail também sobreviver a um system_settings vazio/ausente.
+const DEFAULT_SOURCE_OPTIONS_PJ = [
+  "Prospecção Ativa",
+  "Indicação",
+  "Site",
+  "LinkedIn",
+  "Google Ads",
+  "Evento / Feira",
+  "Parceiro",
+  "Inbound Marketing",
+  "Outro",
+];
+
 export default function LeadPJDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -146,20 +160,33 @@ export default function LeadPJDetail() {
     refetchOnMount: 'always',
   });
 
-  // Task #67 — leitura defensiva: se o setting existir mas estiver vazio
-  // (`'[]'`), cai pros defaults para o dropdown nunca ficar sem opções.
-  const INTEREST_OPTIONS = useMemo(() => {
+  // Task #67 — leitura defensiva das opções salvas em system_settings:
+  //  - se o setting não existir ou estiver malformado/vazio (`'[]'`),
+  //    cai pros defaults para o dropdown nunca ficar sem opções;
+  //  - aceita tanto camelCase (settingValue) como snake_case (setting_value)
+  //    para sobreviver a respostas inconsistentes da API.
+  const readOptionsSetting = (key, defaults) => {
     const setting = systemSettings.find(
-      (s) => s.settingKey === 'interest_options_pj' || s.setting_key === 'interest_options_pj'
+      (s) => s.settingKey === key || s.setting_key === key
     );
-    if (setting) {
-      try {
-        const parsed = JSON.parse(setting.settingValue ?? setting.setting_value ?? '');
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return DEFAULT_INTEREST_OPTIONS_PJ;
-  }, [systemSettings]);
+    if (!setting) return defaults;
+    const raw = setting.settingValue ?? setting.setting_value ?? '';
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {}
+    return defaults;
+  };
+
+  const INTEREST_OPTIONS = useMemo(
+    () => readOptionsSetting('interest_options_pj', DEFAULT_INTEREST_OPTIONS_PJ),
+    [systemSettings]
+  );
+
+  const SOURCE_OPTIONS = useMemo(
+    () => readOptionsSetting('source_options_pj', DEFAULT_SOURCE_OPTIONS_PJ),
+    [systemSettings]
+  );
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ['leadPJ', leadId],
@@ -2179,19 +2206,73 @@ export default function LeadPJDetail() {
 
                 <div>
                   <Label className="text-gray-900 dark:text-gray-100">Interesse</Label>
-                  <Select 
-                    value={editedLead.interest !== undefined ? editedLead.interest : (lead.interest || "")} 
-                    onValueChange={(val) => handleFieldChange('interest', val)}
-                  >
-                    <SelectTrigger className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-                      <SelectValue placeholder="Selecione o interesse" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INTEREST_OPTIONS.map(option => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {(() => {
+                    // Task #67 — preserva valor legado: se o lead já tem um
+                    // "interesse" salvo que não está mais nas opções
+                    // configuradas (admin removeu a opção depois), incluímos
+                    // o valor atual no dropdown rotulado como "(valor existente)"
+                    // para que o admin não perca o dado ao salvar.
+                    const currentValue = editedLead.interest !== undefined
+                      ? editedLead.interest
+                      : (lead.interest || "");
+                    const renderedOptions = currentValue && !INTEREST_OPTIONS.includes(currentValue)
+                      ? [currentValue, ...INTEREST_OPTIONS]
+                      : INTEREST_OPTIONS;
+                    const isLegacy = currentValue && !INTEREST_OPTIONS.includes(currentValue);
+                    return (
+                      <Select
+                        value={currentValue}
+                        onValueChange={(val) => handleFieldChange('interest', val)}
+                      >
+                        <SelectTrigger className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                          <SelectValue placeholder="Selecione o interesse" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {renderedOptions.map(option => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                              {isLegacy && option === currentValue ? ' (valor existente)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    );
+                  })()}
+                </div>
+
+                <div>
+                  <Label className="text-gray-900 dark:text-gray-100">Origem</Label>
+                  {(() => {
+                    // Task #67 — origem agora é editável no detail (antes só
+                    // era setada na criação via QuickLeadPJForm). Mesmo
+                    // padrão de fallback para valores legados que não estão
+                    // mais nas opções configuradas.
+                    const currentValue = editedLead.source !== undefined
+                      ? editedLead.source
+                      : (lead.source || "");
+                    const renderedOptions = currentValue && !SOURCE_OPTIONS.includes(currentValue)
+                      ? [currentValue, ...SOURCE_OPTIONS]
+                      : SOURCE_OPTIONS;
+                    const isLegacy = currentValue && !SOURCE_OPTIONS.includes(currentValue);
+                    return (
+                      <Select
+                        value={currentValue}
+                        onValueChange={(val) => handleFieldChange('source', val)}
+                      >
+                        <SelectTrigger className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                          <SelectValue placeholder="Selecione a origem" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {renderedOptions.map(option => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                              {isLegacy && option === currentValue ? ' (valor existente)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    );
+                  })()}
                 </div>
 
                 <div>
