@@ -9,7 +9,7 @@ import { loadAgentMiddleware, requirePermission, requireRole } from '../middlewa
 import { assignTicket, distributeUnassignedTickets, DISTRIBUTION_ALGORITHMS } from '../services/ticketDistribution.js';
 import { checkAllSLAWarnings, checkSLABreach, recordFirstResponse, recordStatusChange } from '../services/slaService.js';
 import { runAllAutomations, runAutomationsForLead } from '../services/leadAutomation.js';
-import { checkLeadTemperatures } from '../services/leadTemperatureMonitor.js';
+// `checkLeadTemperatures` foi removido — temperatura é manual desde a Task #62.
 import { generateProposalPDF } from '../services/pdfService.js';
 import { sendWhatsAppMessage, sendDocument, sendTextMessage } from '../services/whatsappService.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -175,17 +175,15 @@ router.post('/run-lead-automations', authMiddleware, loadAgentMiddleware, requir
   }
 });
 
-// Admin-only manual trigger for the cold/hot lead temperature monitor.
-// Runs the same routine the scheduler runs (without touching the schedule),
-// so admins can validate a new cadence/threshold combination right away.
+// Endpoint legado: o monitor automático de temperatura foi desativado na
+// Task #62 (temperatura é 100% manual agora). O endpoint continua respondendo
+// para evitar 404 em integrações antigas, mas não roda nada.
 router.post('/run-lead-temperature-check', authMiddleware, loadAgentMiddleware, requireRole('admin'), async (req, res) => {
-  try {
-    const result = await checkLeadTemperatures();
-    res.json({ success: true, ...result });
-  } catch (error) {
-    console.error('[Lead Temperature] Erro na verificação manual:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
+  res.status(410).json({
+    success: false,
+    deprecated: true,
+    message: 'O monitor automático de temperatura foi desativado. A temperatura do lead agora é definida manualmente pelo vendedor.',
+  });
 });
 
 router.post('/record-status-change', authMiddleware, loadAgentMiddleware, async (req, res) => {

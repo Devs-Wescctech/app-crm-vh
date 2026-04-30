@@ -772,6 +772,25 @@ ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
 -- reescritos por outros updates após o lead já ter sido ganho.
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS concluded_at TIMESTAMP;
 
+-- Temperatura manual do lead (Quente/Morno/Frio). A partir da Task #62 a
+-- temperatura passou a ser definida 100% pelo vendedor; não há mais cálculo
+-- automático nem cron que reavalie. NULL = "sem temperatura definida".
+-- Aceita 'hot', 'warm', 'cold' ou NULL — o filtro/selector da UI já valida
+-- antes de enviar, mas a constraint protege contra valores inesperados.
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS temperature VARCHAR(10);
+DO $do_temperature_check$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'leads_pj_temperature_check'
+  ) THEN
+    ALTER TABLE leads_pj
+      ADD CONSTRAINT leads_pj_temperature_check
+      CHECK (temperature IS NULL OR temperature IN ('hot', 'warm', 'cold'));
+  END IF;
+END
+$do_temperature_check$;
+
 -- Backfill: para leads já ganhos sem `concluded_at`, aproveita o melhor
 -- timestamp disponível (entrada mais recente de stage_history apontando para
 -- 'fechado_ganho', depois `converted_at`, e por último `updated_at`).

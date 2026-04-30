@@ -101,6 +101,48 @@ export const TEMPERATURE_META = {
   },
 };
 
+// Opções da temperatura manual exibidas no seletor — a ordem aqui controla
+// a ordem visual no popover/menu. Inclui um "limpar" para remover a marcação.
+export const MANUAL_TEMPERATURE_OPTIONS = [
+  { key: 'hot', ...TEMPERATURE_META.hot },
+  { key: 'warm', ...TEMPERATURE_META.warm },
+  { key: 'cold', ...TEMPERATURE_META.cold },
+];
+
+// Normaliza qualquer valor vindo da API/UI para uma das chaves válidas
+// ('hot' | 'warm' | 'cold') ou null. Útil para tolerar legados ou envios
+// vazios sem renderizar um badge "Sem temperatura" como se fosse uma opção.
+export function normalizeManualTemperature(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = String(value).toLowerCase();
+  if (normalized === 'hot' || normalized === 'warm' || normalized === 'cold') {
+    return normalized;
+  }
+  return null;
+}
+
+// Constrói o objeto de meta esperado pelo TemperatureBadge a partir de uma
+// temperatura manual. Devolve null quando não há temperatura definida — o
+// chamador decide se renderiza um placeholder ("Definir temperatura") ou nada.
+export function buildManualTemperature(value) {
+  const key = normalizeManualTemperature(value);
+  if (!key) return null;
+  const meta = TEMPERATURE_META[key];
+  return {
+    key,
+    label: meta.label,
+    short: meta.short,
+    badgeClass: meta.badgeClass,
+    softClass: meta.softClass,
+    dotClass: meta.dotClass,
+    days: null,
+    interactions: null,
+    value: null,
+    triggers: {},
+    manual: true,
+  };
+}
+
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);

@@ -61,9 +61,9 @@ import { toast } from "sonner";
 import LeadPJTimeline from "@/components/sales/LeadPJTimeline";
 import LeadPJPipelineHistory from "@/components/sales/LeadPJPipelineHistory";
 import LeadPJAgentHistory from "@/components/sales/LeadPJAgentHistory";
-import { computeLeadTemperature, getTemperatureRulesFromSettings, describeTemperatureReasons, describeTemperatureThresholds } from "@/components/utils/temperature";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Check, Minus, Info, Thermometer } from "lucide-react";
+import { buildManualTemperature, normalizeManualTemperature } from "@/components/utils/temperature";
+import TemperatureBadge from "@/components/sales/TemperatureBadge";
+import { Thermometer } from "lucide-react";
 
 const STAGES_PJ = [
   { value: "novo", label: "Novo", color: "bg-gray-500", badge: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100" },
@@ -154,11 +154,6 @@ export default function LeadPJDetail() {
     return DEFAULT_INTEREST_OPTIONS_PJ;
   })();
 
-  const temperatureRules = useMemo(
-    () => getTemperatureRulesFromSettings(systemSettings),
-    [systemSettings]
-  );
-
   const { data: lead, isLoading } = useQuery({
     queryKey: ['leadPJ', leadId],
     queryFn: () => base44.entities.LeadPJ.filter({ id: leadId }).then(res => res[0]),
@@ -179,24 +174,15 @@ export default function LeadPJDetail() {
     refetchOnMount: 'always',
   });
 
-  const temperatureComputed = useMemo(() => {
-    if (!lead) return null;
-    const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
-    return computeLeadTemperature({
-      id: lead?.id,
-      last_contact_at: lastContactAt,
-      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
-      value: lead?.value,
-      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
-    }, activities, temperatureRules);
-  }, [lead, editedLead.lastContactAt, activities, temperatureRules]);
-  const temperatureReasons = useMemo(
-    () => describeTemperatureReasons(temperatureComputed, temperatureRules),
-    [temperatureComputed, temperatureRules]
+  // Temperatura agora é 100% manual (Task #62) — lemos direto do lead.
+  // O `editedLead.temperature` cobre o caso da mutation otimista local
+  // antes do refetch atualizar `lead.temperature`.
+  const currentTemperatureKey = normalizeManualTemperature(
+    editedLead.temperature !== undefined ? editedLead.temperature : lead?.temperature
   );
-  const temperatureThresholds = useMemo(
-    () => describeTemperatureThresholds(temperatureRules, temperatureComputed?.triggers),
-    [temperatureComputed, temperatureRules]
+  const manualTemperature = useMemo(
+    () => buildManualTemperature(currentTemperatureKey),
+    [currentTemperatureKey]
   );
 
   const { data: templates = [] } = useQuery({
@@ -896,28 +882,13 @@ export default function LeadPJDetail() {
     }).format(value || 0);
   };
 
-  const getLeadTemperature = () => {
-    const lastContactAt = (editedLead.lastContactAt !== undefined ? editedLead.lastContactAt : lead?.lastContactAt);
-    const leadForTemp = {
-      id: lead?.id,
-      last_contact_at: lastContactAt,
-      created_at: lead?.createdDate || lead?.createdAt || lead?.created_at,
-      value: lead?.value,
-      monthly_value: lead?.monthly_value ?? lead?.monthlyValue,
-    };
-    const computed = computeLeadTemperature(leadForTemp, activities, temperatureRules);
-    const colorByKey = {
-      hot: 'text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-950',
-      warm: 'text-yellow-600 bg-yellow-100 dark:text-yellow-400 dark:bg-yellow-950',
-      cold: 'text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-950',
-    };
-    return {
-      key: computed.key,
-      label: computed.label,
-      color: colorByKey[computed.key],
-      days: computed.days ?? 0,
-      interactions: computed.interactions,
-    };
+  // Persiste a escolha manual de temperatura no banco e mantém o estado
+  // local em sincronia para refletir a alteração instantaneamente sem
+  // esperar pelo refetch do useQuery.
+  const handleTemperatureChange = (nextKey) => {
+    const normalized = normalizeManualTemperature(nextKey);
+    setEditedLead((prev) => ({ ...prev, temperature: normalized }));
+    updateLeadMutation.mutate({ temperature: normalized });
   };
 
   if (isLoading || !lead) {
@@ -1021,7 +992,6 @@ export default function LeadPJDetail() {
     return configs[type] || configs.task;
   };
 
-  const temperature = getLeadTemperature();
   const leadAgent = agents.find(a => String(a.id) === String(leadAgentId));
 
   return (
@@ -1132,13 +1102,15 @@ export default function LeadPJDetail() {
               <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white/20 text-4xl font-bold text-white shadow-xl backdrop-blur-sm border border-white/20">
                 <Building2 className="w-12 h-12" />
               </div>
-              <div className={`absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold shadow-lg ${
-                temperature.label === 'Quente' ? 'bg-gradient-to-br from-red-500 to-orange-500' :
-                temperature.label === 'Morno' ? 'bg-gradient-to-br from-yellow-400 to-amber-500' :
-                'bg-gradient-to-br from-blue-400 to-cyan-500'
-              } text-white`}>
-                {temperature.days}d
-              </div>
+              {manualTemperature && (
+                <div className={`absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full text-white shadow-lg ${
+                  manualTemperature.key === 'hot' ? 'bg-gradient-to-br from-red-500 to-orange-500' :
+                  manualTemperature.key === 'warm' ? 'bg-gradient-to-br from-yellow-400 to-amber-500' :
+                  'bg-gradient-to-br from-blue-400 to-cyan-500'
+                }`}>
+                  <Thermometer className="w-4 h-4" />
+                </div>
+              )}
             </div>
 
             {/* Info */}
@@ -1164,75 +1136,17 @@ export default function LeadPJDetail() {
                   <span className={`h-2 w-2 rounded-full ${currentStage?.color}`} />
                   {currentStage?.label}
                 </span>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Por que essa temperatura?"
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
-                        temperature.label === 'Quente' ? 'bg-red-500/20 text-red-100 hover:bg-red-500/30' :
-                        temperature.label === 'Morno' ? 'bg-yellow-500/20 text-yellow-100 hover:bg-yellow-500/30' :
-                        'bg-blue-400/20 text-blue-100 hover:bg-blue-400/30'
-                      }`}
-                    >
-                      <Thermometer className="w-3.5 h-3.5" />
-                      {temperature.label}
-                      <Info className="w-3.5 h-3.5 opacity-70" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" sideOffset={6} className="w-80 p-0 overflow-hidden">
-                    <div className={`px-3 py-2 flex items-center gap-2 ${temperatureComputed?.softClass || ''}`}>
-                      <Thermometer className="w-4 h-4" />
-                      <div className="text-sm font-semibold">{temperatureComputed?.label}</div>
-                      {temperatureComputed?.days !== null && temperatureComputed?.days !== undefined && (
-                        <span className="ml-auto text-[11px] opacity-80">
-                          {temperatureComputed.days}d desde o último contato
-                        </span>
-                      )}
-                    </div>
-                    <div className="p-3 space-y-3 bg-white dark:bg-gray-900">
-                      <section>
-                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
-                          Por que essa temperatura?
-                        </h4>
-                        {temperatureReasons.length > 0 ? (
-                          <ul className="space-y-1">
-                            {temperatureReasons.map((r) => (
-                              <li key={r.key} className="flex items-start gap-2 text-xs text-gray-700 dark:text-gray-200">
-                                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-                                <span>{r.text}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-xs text-gray-600 dark:text-gray-300">
-                            Nenhuma regra de quente ou frio foi atingida — o lead fica como{' '}
-                            <strong>Morno</strong> por padrão.
-                          </p>
-                        )}
-                      </section>
-                      {temperatureThresholds.length > 0 && (
-                        <section>
-                          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
-                            Regras configuradas
-                          </h4>
-                          <ul className="space-y-1">
-                            {temperatureThresholds.map((row) => (
-                              <li key={row.key} className={`flex items-start gap-2 text-xs ${row.active ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-500 dark:text-gray-400'}`}>
-                                {row.active ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-                                ) : (
-                                  <Minus className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0" />
-                                )}
-                                <span>{row.text}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </section>
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <TemperatureBadge
+                  value={currentTemperatureKey}
+                  onChange={handleTemperatureChange}
+                  size="md"
+                  placeholder="Definir temperatura"
+                  triggerClassName={
+                    manualTemperature
+                      ? '!bg-white/20 !text-white hover:!bg-white/30 border border-white/20'
+                      : '!border-white/40 !text-white/90 hover:!bg-white/10'
+                  }
+                />
               </div>
 
               {/* Quick Contact Actions */}
@@ -1825,94 +1739,38 @@ export default function LeadPJDetail() {
 
           {/* COLUNA DIREITA: Agente + Info + Valores (1/3) */}
           <div className="lg:col-span-1 space-y-6">
-            {/* Por que essa temperatura? */}
-            {temperatureComputed && (
-              <Card className="bg-white dark:bg-gray-900">
-                <CardHeader className="border-b border-gray-200 dark:border-gray-700">
-                  <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100 text-base">
-                    <Thermometer className="w-5 h-5 text-orange-500" />
-                    Por que essa temperatura?
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-5 space-y-4">
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${temperatureComputed.softClass}`}>
-                    <Thermometer className="w-4 h-4" />
-                    <div className="text-sm font-semibold">{temperatureComputed.label}</div>
-                    {temperatureComputed.days !== null && temperatureComputed.days !== undefined && (
-                      <span className="ml-auto text-[11px] opacity-80">
-                        {temperatureComputed.days}d desde o último contato
-                      </span>
-                    )}
+            {/* Temperatura manual do lead */}
+            <Card className="bg-white dark:bg-gray-900">
+              <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+                <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100 text-base">
+                  <Thermometer className="w-5 h-5 text-orange-500" />
+                  Temperatura do lead
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-5 space-y-3">
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  Você decide. Clique para marcar como Quente, Morno ou Frio — ou
+                  remova a marcação a qualquer momento.
+                </p>
+                <TemperatureBadge
+                  value={currentTemperatureKey}
+                  onChange={handleTemperatureChange}
+                  size="lg"
+                  placeholder="Definir temperatura"
+                />
+                {manualTemperature?.key === 'cold' && (
+                  <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <Link
+                      to={`${createPageUrl('LeadsPJKanban')}?temperature=cold`}
+                      className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100"
+                    >
+                      <ListTodo className="w-4 h-4" />
+                      Ver todos os leads frios
+                    </Link>
                   </div>
-
-                  <div>
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
-                      Regras atingidas
-                    </h4>
-                    {temperatureReasons.length > 0 ? (
-                      <ul className="space-y-1.5">
-                        {temperatureReasons.map((r) => (
-                          <li
-                            key={r.key}
-                            className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200"
-                          >
-                            <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-                            <span>{r.text}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-sm text-gray-600 dark:text-gray-300">
-                        Nenhuma regra de quente ou frio foi atingida — o lead fica como{' '}
-                        <strong>Morno</strong> por padrão.
-                      </p>
-                    )}
-                  </div>
-
-                  {temperatureThresholds.length > 0 && (
-                    <div>
-                      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
-                        Regras configuradas
-                      </h4>
-                      <ul className="space-y-1.5">
-                        {temperatureThresholds.map((row) => (
-                          <li
-                            key={row.key}
-                            className={`flex items-start gap-2 text-sm ${
-                              row.active
-                                ? 'text-gray-900 dark:text-gray-100 font-medium'
-                                : 'text-gray-500 dark:text-gray-400'
-                            }`}
-                          >
-                            {row.active ? (
-                              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-                            ) : (
-                              <Minus className="w-4 h-4 text-gray-300 dark:text-gray-600 mt-0.5 flex-shrink-0" />
-                            )}
-                            <span>{row.text}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3">
-                        Ajuste essas regras em Configurações → Temperatura de leads.
-                      </p>
-                    </div>
-                  )}
-
-                  {temperatureComputed?.key === 'cold' && (
-                    <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <Link
-                        to={`${createPageUrl('LeadsPJKanban')}?temperature=cold`}
-                        className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100"
-                      >
-                        <ListTodo className="w-4 h-4" />
-                        Ver todos os meus leads frios
-                      </Link>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                )}
+              </CardContent>
+            </Card>
 
             {/* Agente Responsável */}
             <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950 dark:to-indigo-900">

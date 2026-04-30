@@ -52,7 +52,7 @@ import { createPageUrl } from "@/utils";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { hasFullVisibility, hasTeamVisibility, getVisibleAgentIds, getDataVisibilityKey, getVisibleTeams, getVisibleAgentsForFilter } from "@/components/utils/permissions";
-import { computeLeadTemperature, getTemperatureRulesFromSettings, TEMPERATURE_META } from "@/components/utils/temperature";
+import { buildManualTemperature, normalizeManualTemperature, TEMPERATURE_META } from "@/components/utils/temperature";
 import TemperatureBadge from "@/components/sales/TemperatureBadge";
 import {
   DndContext,
@@ -209,7 +209,7 @@ function DroppableColumnPJ({ id, stage, children, overId, activeId }) {
   );
 }
 
-function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost, temperature, temperatureRules }) {
+function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigate, formatCurrency, formatDate, updateLeadMutation, TasksPopover, onMarkLost }) {
   const {
     attributes,
     listeners,
@@ -304,22 +304,20 @@ function SortableLeadPJCard({ lead, stage, pendingTasksCount, agentData, navigat
             </div>
           )}
 
-          {(lead.porte || temperature) && (
-            <div className="flex flex-wrap gap-2 mt-3">
-              {temperature && (
-                <TemperatureBadge
-                  temperature={temperature}
-                  rules={temperatureRules}
-                  size="md"
-                />
-              )}
-              {lead.porte && (
-                <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium">
-                  {lead.porte}
-                </span>
-              )}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <TemperatureBadge
+              value={lead.temperature}
+              onChange={(next) =>
+                updateLeadMutation.mutate({ id: lead.id, data: { temperature: next } })
+              }
+              size="md"
+            />
+            {lead.porte && (
+              <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-medium">
+                {lead.porte}
+              </span>
+            )}
+          </div>
 
           {(stage.id === 'fechado_ganho' || stage.id === 'fechado_perdido') && (
             <div className="mt-3">
@@ -651,30 +649,27 @@ export default function LeadsPJKanban() {
     staleTime: 60000,
   });
 
-  const temperatureRules = useMemo(
-    () => getTemperatureRulesFromSettings(systemSettings),
-    [systemSettings]
-  );
-
+  // Mapeia leadId -> objeto de temperatura manual ({ key, label, softClass... })
+  // já normalizado. Pulamos leads sem temperatura definida — o seletor manual
+  // permite que muitos leads fiquem sem marcação, e isso é OK (zero badge).
   const temperatureByLead = useMemo(() => {
-    const now = new Date();
     const map = new Map();
     for (const lead of leadsPJ) {
-      map.set(String(lead.id), computeLeadTemperature(lead, allActivitiesPJ, temperatureRules, now));
+      const meta = buildManualTemperature(lead?.temperature);
+      if (meta) map.set(String(lead.id), meta);
     }
     return map;
-  }, [leadsPJ, allActivitiesPJ, temperatureRules]);
+  }, [leadsPJ]);
 
-  // Count of currently-cold leads (excluding finalized leads, which are already
-  // filtered out of `leadsPJ`). Used to power the "Frios" quick-filter chip.
+  // Quantidade de leads marcados manualmente como "frio" — alimenta o chip
+  // de filtro rápido "Frios" no topo do kanban.
   const coldLeadsCount = useMemo(() => {
     let count = 0;
     for (const lead of leadsPJ) {
-      const t = temperatureByLead.get(String(lead.id));
-      if (t && t.key === 'cold') count++;
+      if (normalizeManualTemperature(lead?.temperature) === 'cold') count++;
     }
     return count;
-  }, [leadsPJ, temperatureByLead]);
+  }, [leadsPJ]);
 
   const leadsQueryKey = ['leadsPJ', isAdmin ? 'admin' : currentAgent?.id];
   
@@ -1555,8 +1550,6 @@ export default function LeadsPJKanban() {
                                 formatDate={formatDate}
                                 updateLeadMutation={updateLeadMutation}
                                 TasksPopover={TasksPopover}
-                                temperature={temperatureByLead.get(String(lead.id))}
-                                temperatureRules={temperatureRules}
                                 onMarkLost={(leadId) => {
                                   setLostReasonDialog({ leadId, fromStage: lead.stage, isDarBaixa: true });
                                   setLostReasonText('');
@@ -1686,17 +1679,16 @@ export default function LeadsPJKanban() {
                               </Badge>
                             </td>
                             <td className="px-4 py-3">
-                              {(() => {
-                                const t = temperatureByLead.get(String(lead.id));
-                                if (!t) return <span className="text-xs text-gray-400">-</span>;
-                                return (
-                                  <TemperatureBadge
-                                    temperature={t}
-                                    rules={temperatureRules}
-                                    size="sm"
-                                  />
-                                );
-                              })()}
+                              <TemperatureBadge
+                                value={lead.temperature}
+                                onChange={(next) =>
+                                  updateLeadMutation.mutate({
+                                    id: lead.id,
+                                    data: { temperature: next },
+                                  })
+                                }
+                                size="sm"
+                              />
                             </td>
                             <td className="px-4 py-3">
                               <span className="font-semibold text-sm text-purple-600 dark:text-purple-400">
