@@ -860,6 +860,21 @@ CREATE TABLE IF NOT EXISTS lead_pj_files (
 CREATE INDEX IF NOT EXISTS idx_lead_pj_files_lead_id ON lead_pj_files(lead_id);
 
 -- =====================
+-- PRODUCTS (Catálogo de produtos para propostas - Task #63)
+-- =====================
+CREATE TABLE IF NOT EXISTS products (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    default_value NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (default_value >= 0),
+    description TEXT,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_products_active ON products(active);
+CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+
+-- =====================
 -- LEAD PJ PROPOSAL ITEMS (Múltiplos produtos por proposta)
 -- =====================
 CREATE TABLE IF NOT EXISTS lead_pj_proposal_items (
@@ -869,6 +884,7 @@ CREATE TABLE IF NOT EXISTS lead_pj_proposal_items (
     quantidade NUMERIC(12,3) NOT NULL DEFAULT 1 CHECK (quantidade > 0),
     valor_unitario NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (valor_unitario >= 0),
     sort_order INTEGER NOT NULL DEFAULT 0,
+    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -887,6 +903,17 @@ DO $$ BEGIN
       ADD CONSTRAINT lead_pj_proposal_items_valor_unitario_check CHECK (valor_unitario >= 0);
   END IF;
 END $$;
+-- Task #63: backfill product_id column on existing installs (idempotent).
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'lead_pj_proposal_items' AND column_name = 'product_id'
+  ) THEN
+    ALTER TABLE lead_pj_proposal_items
+      ADD COLUMN product_id UUID REFERENCES products(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_lead_pj_proposal_items_product_id ON lead_pj_proposal_items(product_id);
 
 -- =====================
 -- REFERRAL AUTOMATIONS

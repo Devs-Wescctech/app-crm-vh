@@ -79,6 +79,7 @@ const MENU_MODULES = [
     title: "Sistemas",
     items: [
       { id: "SystemsSalesFields", title: "Campos de Vendas" },
+      { id: "SystemsProducts", title: "Catálogo de Produtos" },
       { id: "SystemsGoogleCalendar", title: "Google Agenda" },
       { id: "SystemsAutentique", title: "Autentique" },
     ]

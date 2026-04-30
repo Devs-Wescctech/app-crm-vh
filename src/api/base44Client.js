@@ -158,6 +158,7 @@ export const base44 = {
     AutomationLog: createEntityClient('automation-logs'),
     CallAudit: createEntityClient('call-audits'),
     QualityChecklist: createEntityClient('quality-checklists'),
+    Product: createEntityClient('products'),
   },
   
   whatsapp: {

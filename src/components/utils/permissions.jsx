@@ -161,6 +161,7 @@ export function canManageSettings(agent) {
 
 export const SYSTEMS_PERMISSION_KEYS = [
   'SystemsSalesFields',
+  'SystemsProducts',
   'SystemsGoogleCalendar',
   'SystemsAutentique',
   'SystemsLeadTemperature',

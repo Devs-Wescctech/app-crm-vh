@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { createCrudRouter, filterValidColumns } from '../utils/crud.js';
 import { authMiddleware, optionalAuth } from '../middleware/auth.js';
+import { loadAgentMiddleware, requireRole } from '../middleware/permissions.js';
 import { query, pool } from '../config/database.js';
 import { 
   notifyLeadAssigned, 
@@ -142,6 +143,8 @@ const entities = {
   'notification-preferences': { tableName: 'notification_preferences', allowedFilters: ['user_email'] },
   'quality-checklists': { tableName: 'quality_checklists', searchFields: ['name'] },
   'call-audits': { tableName: 'call_audits', allowedFilters: ['agent_id', 'ticket_id', 'status'] },
+  // Task #63 — catálogo de produtos selecionáveis nos itens da proposta.
+  products: { searchFields: ['name', 'description'], allowedFilters: ['active'] },
 };
 
 async function syncAutomationTeams(automationId, teamIds) {
@@ -419,6 +422,21 @@ for (const [route, options] of Object.entries(entities)) {
       }
     });
 
+    router.post(`/${route}/filter`, authMiddleware, crud.filter);
+    continue;
+  }
+
+  if (route === 'products') {
+    // Task #63 — leitura disponível para qualquer usuário autenticado (o
+    // vendedor precisa listar produtos para selecionar no item da proposta),
+    // mas escrita é restrita a admin/coordenador, mesmo set que controla a
+    // aba "Produtos" em Configurações no frontend (SystemsProducts).
+    const productsAdminGuard = [authMiddleware, loadAgentMiddleware, requireRole('admin', 'coordinator')];
+    router.get(`/${route}`, authMiddleware, crud.list);
+    router.get(`/${route}/:id`, authMiddleware, crud.get);
+    router.post(`/${route}`, productsAdminGuard, crud.create);
+    router.put(`/${route}/:id`, productsAdminGuard, crud.update);
+    router.delete(`/${route}/:id`, productsAdminGuard, crud.delete);
     router.post(`/${route}/filter`, authMiddleware, crud.filter);
     continue;
   }
@@ -1263,6 +1281,12 @@ function parseItemPayload(body) {
     : Number(valorUnitarioRaw);
   const sortOrderProvided = !(sortOrderRaw === undefined || sortOrderRaw === null || sortOrderRaw === '');
   const sortOrder = sortOrderProvided ? Number(sortOrderRaw) : null;
+  // Task #63 — product_id é opcional. Tratamos string vazia como null para
+  // permitir itens em texto livre (descrição manual sem catálogo).
+  const productIdRaw = data.product_id;
+  const productId = (productIdRaw === undefined || productIdRaw === null || productIdRaw === '')
+    ? null
+    : String(productIdRaw);
   return {
     lead_id: data.lead_id,
     descricao,
@@ -1270,6 +1294,7 @@ function parseItemPayload(body) {
     valor_unitario: valorUnitario,
     sort_order: sortOrder,
     sort_order_provided: sortOrderProvided,
+    product_id: productId,
   };
 }
 
@@ -1294,9 +1319,9 @@ router.post('/lead-pj-proposal-items', authMiddleware, async (req, res) => {
 
     const inserted = await withTransaction(async (exec) => {
       const result = await exec(
-        `INSERT INTO lead_pj_proposal_items (lead_id, descricao, quantidade, valor_unitario, sort_order)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [payload.lead_id, payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder]
+        `INSERT INTO lead_pj_proposal_items (lead_id, descricao, quantidade, valor_unitario, sort_order, product_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [payload.lead_id, payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder, payload.product_id]
       );
       await recomputeLeadPjValueFromItems(payload.lead_id, exec);
       return result.rows[0];
@@ -1335,10 +1360,11 @@ router.put('/lead-pj-proposal-items/:id', authMiddleware, async (req, res) => {
                 quantidade = $2,
                 valor_unitario = $3,
                 sort_order = $4,
+                product_id = $5,
                 updated_at = NOW()
-          WHERE id = $5
+          WHERE id = $6
           RETURNING *`,
-        [payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder, id]
+        [payload.descricao, payload.quantidade, payload.valor_unitario, sortOrder, payload.product_id, id]
       );
       await recomputeLeadPjValueFromItems(leadId, exec);
       return result.rows[0];

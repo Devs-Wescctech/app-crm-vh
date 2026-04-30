@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer, ExternalLink } from "lucide-react";
+import { Settings as SettingsIcon, Save, Loader2, ListChecks, Plus, X, GripVertical, Calendar, Link2, Unlink, FileSignature, CheckCircle2, AlertCircle, Eye, EyeOff, Thermometer, ExternalLink, Package, Pencil, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -76,10 +76,11 @@ export default function Settings() {
   const currentAgent = user?.agent;
 
   const canSalesFields = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsSalesFields');
+  const canProducts = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsProducts');
   const canGoogleCalendarSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsGoogleCalendar');
   const canAutentiqueSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsAutentique');
   const canTemperatureSettings = isAdmin || canAccessSystemsItem(currentAgent, 'SystemsLeadTemperature');
-  const anySystemsTab = canSalesFields || canGoogleCalendarSettings || canAutentiqueSettings || canTemperatureSettings;
+  const anySystemsTab = canSalesFields || canProducts || canGoogleCalendarSettings || canAutentiqueSettings || canTemperatureSettings;
 
   if (!anySystemsTab) {
     return (
@@ -95,11 +96,13 @@ export default function Settings() {
 
   const defaultTab = canSalesFields
     ? "sales-fields"
-    : canTemperatureSettings
-      ? "lead-temperature"
-      : canGoogleCalendarSettings
-        ? "google-calendar"
-        : "autentique";
+    : canProducts
+      ? "products"
+      : canTemperatureSettings
+        ? "lead-temperature"
+        : canGoogleCalendarSettings
+          ? "google-calendar"
+          : "autentique";
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-950 min-h-screen">
@@ -117,6 +120,12 @@ export default function Settings() {
             <TabsTrigger value="sales-fields" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
               <ListChecks className="w-4 h-4 mr-2" />
               Campos de Vendas
+            </TabsTrigger>
+          )}
+          {canProducts && (
+            <TabsTrigger value="products" className="data-[state=active]:bg-blue-50 dark:data-[state=active]:bg-blue-950">
+              <Package className="w-4 h-4 mr-2" />
+              Produtos
             </TabsTrigger>
           )}
           {canTemperatureSettings && (
@@ -142,6 +151,12 @@ export default function Settings() {
         {canSalesFields && (
           <TabsContent value="sales-fields" className="space-y-6">
             <SalesFieldsManager settings={settings} onSave={createOrUpdateSettingMutation} />
+          </TabsContent>
+        )}
+
+        {canProducts && (
+          <TabsContent value="products" className="space-y-6">
+            <ProductsManager />
           </TabsContent>
         )}
 
@@ -1165,6 +1180,321 @@ function TargetCalendarPicker() {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+function ProductsManager() {
+  const queryClient = useQueryClient();
+  const { data: products = [], isLoading } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => base44.entities.Product.list('-created_at'),
+  });
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [form, setForm] = useState({ name: '', defaultValue: '', description: '', active: true });
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const resetForm = () => {
+    setForm({ name: '', defaultValue: '', description: '', active: true });
+    setEditingProduct(null);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setDialogOpen(true);
+  };
+
+  const openEdit = (product) => {
+    setEditingProduct(product);
+    setForm({
+      name: product.name || '',
+      defaultValue: String(product.defaultValue ?? product.default_value ?? ''),
+      description: product.description || '',
+      active: product.active !== false,
+    });
+    setDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    setDialogOpen(false);
+    resetForm();
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const name = (form.name || '').trim();
+      const defaultValue = parseFloat(form.defaultValue);
+      if (!name) throw new Error('Informe o nome do produto');
+      if (!Number.isFinite(defaultValue) || defaultValue < 0) {
+        throw new Error('Valor padrão deve ser maior ou igual a zero');
+      }
+      const payload = {
+        name,
+        default_value: defaultValue,
+        description: (form.description || '').trim() || null,
+        active: !!form.active,
+      };
+      if (editingProduct) {
+        return base44.entities.Product.update(editingProduct.id, payload);
+      }
+      return base44.entities.Product.create(payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['productsActive'] });
+      toast.success(editingProduct ? 'Produto atualizado!' : 'Produto cadastrado!');
+      closeDialog();
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao salvar produto'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.Product.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['productsActive'] });
+      toast.success('Produto removido');
+      setConfirmDeleteId(null);
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover produto'),
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, active }) => base44.entities.Product.update(id, { active }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['productsActive'] });
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao atualizar produto'),
+  });
+
+  const formatBRL = (n) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n) || 0);
+
+  return (
+    <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <CardHeader className="border-b border-gray-200 dark:border-gray-800 flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-gray-900 dark:text-gray-100 text-base flex items-center gap-2">
+            <Package className="w-5 h-5" />
+            Catálogo de Produtos
+          </CardTitle>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Cadastre produtos e serviços com valor padrão sugerido. Os vendedores selecionarão a partir deste catálogo ao montar uma proposta.
+          </p>
+        </div>
+        <Button
+          onClick={openCreate}
+          style={{ backgroundColor: '#5A2A3C' }}
+          className="text-white hover:opacity-90"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Novo produto
+        </Button>
+      </CardHeader>
+      <CardContent className="pt-4">
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+          </div>
+        ) : products.length === 0 ? (
+          <div className="text-center py-10 text-sm text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg">
+            Nenhum produto cadastrado ainda. Clique em "Novo produto" para começar.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-800 text-left text-gray-500 dark:text-gray-400">
+                  <th className="py-2 px-3 font-medium">Nome</th>
+                  <th className="py-2 px-3 font-medium">Valor padrão</th>
+                  <th className="py-2 px-3 font-medium">Descrição</th>
+                  <th className="py-2 px-3 font-medium">Status</th>
+                  <th className="py-2 px-3 font-medium text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((p) => {
+                  const active = p.active !== false;
+                  return (
+                    <tr key={p.id} className="border-b border-gray-100 dark:border-gray-800/60 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <td className="py-2 px-3 font-medium text-gray-900 dark:text-gray-100">{p.name}</td>
+                      <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{formatBRL(p.defaultValue ?? p.default_value)}</td>
+                      <td className="py-2 px-3 text-gray-500 dark:text-gray-400 max-w-xs truncate">{p.description || '—'}</td>
+                      <td className="py-2 px-3">
+                        <Badge className={active
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
+                          : 'bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}>
+                          {active ? 'Ativo' : 'Inativo'}
+                        </Badge>
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleActiveMutation.mutate({ id: p.id, active: !active })}
+                            className="h-8 px-2 text-xs"
+                            disabled={toggleActiveMutation.isPending}
+                            title={active ? 'Desativar' : 'Ativar'}
+                          >
+                            {active ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEdit(p)}
+                            className="h-8 w-8 p-0 text-gray-500 hover:text-blue-600"
+                            title="Editar"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmDeleteId(p.id)}
+                            className="h-8 w-8 p-0 text-gray-500 hover:text-red-600"
+                            title="Remover"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+
+      <ProductDialog
+        open={dialogOpen}
+        onClose={closeDialog}
+        form={form}
+        setForm={setForm}
+        onSave={() => saveMutation.mutate()}
+        saving={saveMutation.isPending}
+        editing={!!editingProduct}
+      />
+
+      <ConfirmDeleteDialog
+        open={!!confirmDeleteId}
+        onCancel={() => setConfirmDeleteId(null)}
+        onConfirm={() => deleteMutation.mutate(confirmDeleteId)}
+        loading={deleteMutation.isPending}
+      />
+    </Card>
+  );
+}
+
+function ProductDialog({ open, onClose, form, setForm, onSave, saving, editing }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-md border border-gray-200 dark:border-gray-700"
+      >
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {editing ? 'Editar produto' : 'Novo produto'}
+          </h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <Label className="text-sm">Nome *</Label>
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Ex: Plano Corporativo Premium"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-sm">Valor padrão (R$) *</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.defaultValue}
+              onChange={(e) => setForm({ ...form, defaultValue: e.target.value })}
+              placeholder="0.00"
+              className="mt-1"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Sugestão pré-preenchida no momento da proposta. O vendedor pode ajustar.
+            </p>
+          </div>
+          <div>
+            <Label className="text-sm">Descrição (opcional)</Label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="Detalhes internos sobre o produto/serviço"
+              rows={3}
+              className="mt-1 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#5A2A3C]/40"
+            />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!form.active}
+              onChange={(e) => setForm({ ...form, active: e.target.checked })}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Ativo (disponível para seleção em propostas)</span>
+          </label>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button
+            onClick={onSave}
+            disabled={saving}
+            style={{ backgroundColor: '#5A2A3C' }}
+            className="text-white hover:opacity-90"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+            {editing ? 'Salvar alterações' : 'Cadastrar produto'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDeleteDialog({ open, onCancel, onConfirm, loading }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onCancel}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-sm border border-gray-200 dark:border-gray-700"
+      >
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Remover produto?</h3>
+        </div>
+        <div className="px-5 py-4 text-sm text-gray-600 dark:text-gray-300">
+          O produto deixará de aparecer no catálogo. As propostas que já o referenciam continuarão funcionando — o nome ficou registrado no item da proposta.
+        </div>
+        <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={loading}>Cancelar</Button>
+          <Button
+            onClick={onConfirm}
+            disabled={loading}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Remover
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

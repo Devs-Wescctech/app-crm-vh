@@ -125,9 +125,9 @@ export default function LeadPJDetail() {
   const [newProposalNote, setNewProposalNote] = useState("");
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
-  const [newItem, setNewItem] = useState({ descricao: "", quantidade: "1", valorUnitario: "" });
+  const [newItem, setNewItem] = useState({ descricao: "", quantidade: "1", valorUnitario: "", productId: "" });
   const [editingItemId, setEditingItemId] = useState(null);
-  const [editingItemDraft, setEditingItemDraft] = useState({ descricao: "", quantidade: "", valorUnitario: "" });
+  const [editingItemDraft, setEditingItemDraft] = useState({ descricao: "", quantidade: "", valorUnitario: "", productId: "" });
   const fileInputRef = useRef(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
@@ -234,6 +234,19 @@ export default function LeadPJDetail() {
     staleTime: 0,
   });
 
+  // Task #63 — catálogo de produtos para a seleção dos itens da proposta.
+  // Filtramos apenas os ativos; produtos desativados continuam aparecendo no
+  // histórico do item (descrição = snapshot do nome) mas somem do select.
+  const { data: catalogProducts = [] } = useQuery({
+    queryKey: ['productsActive'],
+    queryFn: () => base44.entities.Product.filter({ active: true }),
+    staleTime: 1000 * 30,
+  });
+  const sortedActiveProducts = useMemo(
+    () => [...catalogProducts].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR')),
+    [catalogProducts]
+  );
+
   const invalidateProposalItems = () => {
     queryClient.invalidateQueries({ queryKey: ['leadPJProposalItems', leadId] });
     queryClient.invalidateQueries({ queryKey: ['leadPJ', leadId] });
@@ -244,7 +257,7 @@ export default function LeadPJDetail() {
     mutationFn: (data) => base44.entities.LeadPJProposalItem.create(data),
     onSuccess: () => {
       invalidateProposalItems();
-      setNewItem({ descricao: "", quantidade: "1", valorUnitario: "" });
+      setNewItem({ descricao: "", quantidade: "1", valorUnitario: "", productId: "" });
       toast.success('Item adicionado!');
     },
     onError: (err) => toast.error(err?.message || 'Erro ao adicionar item'),
@@ -255,7 +268,7 @@ export default function LeadPJDetail() {
     onSuccess: () => {
       invalidateProposalItems();
       setEditingItemId(null);
-      setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "" });
+      setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "", productId: "" });
       toast.success('Item atualizado!');
     },
     onError: (err) => toast.error(err?.message || 'Erro ao atualizar item'),
@@ -280,7 +293,7 @@ export default function LeadPJDetail() {
     const quantidade = parseFloat(newItem.quantidade);
     const valorUnitario = parseFloat(newItem.valorUnitario);
     if (!descricao) {
-      toast.error('Informe a descrição do item');
+      toast.error('Selecione um produto ou informe a descrição');
       return;
     }
     if (!Number.isFinite(quantidade) || quantidade <= 0) {
@@ -297,21 +310,70 @@ export default function LeadPJDetail() {
       quantidade,
       valor_unitario: valorUnitario,
       sort_order: proposalItems.length,
+      product_id: newItem.productId || null,
+    });
+  };
+
+  // Task #63 — quando o vendedor escolhe um produto do catálogo, snapshot do
+  // nome vai pro `descricao` (preserva o nome se o produto for desativado) e
+  // o `valor_unitario` é pré-preenchido com o `default_value`. "__custom__"
+  // libera a edição manual em texto livre (sem product_id).
+  const FREE_TEXT_OPTION = '__custom__';
+  const handleSelectProductForNew = (value) => {
+    if (value === FREE_TEXT_OPTION) {
+      setNewItem({ ...newItem, productId: '', descricao: '' });
+      return;
+    }
+    const product = sortedActiveProducts.find((p) => p.id === value);
+    if (!product) return;
+    const defaultValue = product.defaultValue ?? product.default_value ?? 0;
+    setNewItem({
+      ...newItem,
+      productId: product.id,
+      descricao: product.name,
+      valorUnitario: String(defaultValue),
+    });
+  };
+
+  const handleSelectProductForEditing = (value) => {
+    if (value === FREE_TEXT_OPTION) {
+      setEditingItemDraft({ ...editingItemDraft, productId: '', descricao: '' });
+      return;
+    }
+    const product = sortedActiveProducts.find((p) => p.id === value);
+    if (!product) return;
+    const defaultValue = product.defaultValue ?? product.default_value ?? 0;
+    setEditingItemDraft({
+      ...editingItemDraft,
+      productId: product.id,
+      descricao: product.name,
+      valorUnitario: String(defaultValue),
     });
   };
 
   const startEditingItem = (item) => {
     setEditingItemId(item.id);
+    const itemProductId = item.productId ?? item.product_id ?? '';
+    // Se o item referenciar um produto que foi desativado/excluído (não está
+    // mais em sortedActiveProducts), cai pro modo "texto livre" pra não deixar
+    // o Select com valor fantasma e o input de descrição escondido. Quando a
+    // lista ainda não carregou (vazia), preserva o productId — o estado é
+    // recalculado naturalmente porque catalogProducts vem via React Query.
+    const productStillActive =
+      !itemProductId ||
+      sortedActiveProducts.length === 0 ||
+      sortedActiveProducts.some((p) => p.id === itemProductId);
     setEditingItemDraft({
       descricao: item.descricao || '',
       quantidade: String(item.quantidade ?? ''),
       valorUnitario: String(item.valorUnitario ?? item.valor_unitario ?? ''),
+      productId: productStillActive ? (itemProductId || '') : '',
     });
   };
 
   const cancelEditingItem = () => {
     setEditingItemId(null);
-    setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "" });
+    setEditingItemDraft({ descricao: "", quantidade: "", valorUnitario: "", productId: "" });
   };
 
   const handleSaveEditingItem = () => {
@@ -319,7 +381,7 @@ export default function LeadPJDetail() {
     const quantidade = parseFloat(editingItemDraft.quantidade);
     const valorUnitario = parseFloat(editingItemDraft.valorUnitario);
     if (!descricao) {
-      toast.error('Informe a descrição do item');
+      toast.error('Selecione um produto ou informe a descrição');
       return;
     }
     if (!Number.isFinite(quantidade) || quantidade <= 0) {
@@ -332,7 +394,12 @@ export default function LeadPJDetail() {
     }
     updateProposalItemMutation.mutate({
       id: editingItemId,
-      data: { descricao, quantidade, valor_unitario: valorUnitario },
+      data: {
+        descricao,
+        quantidade,
+        valor_unitario: valorUnitario,
+        product_id: editingItemDraft.productId || null,
+      },
     });
   };
 
@@ -2159,13 +2226,38 @@ export default function LeadPJDetail() {
                           {isEditing ? (
                             <div className="space-y-2">
                               <div>
-                                <Label className="text-xs text-gray-600 dark:text-gray-300">Descrição</Label>
-                                <Input
-                                  value={editingItemDraft.descricao}
-                                  onChange={(e) => setEditingItemDraft({ ...editingItemDraft, descricao: e.target.value })}
-                                  placeholder="Ex: Plano corporativo Premium"
-                                  className="mt-1"
-                                />
+                                <Label className="text-xs text-gray-600 dark:text-gray-300">Produto</Label>
+                                <Select
+                                  value={editingItemDraft.productId || (editingItemDraft.descricao ? FREE_TEXT_OPTION : '')}
+                                  onValueChange={handleSelectProductForEditing}
+                                >
+                                  <SelectTrigger className="mt-1 bg-white dark:bg-gray-800">
+                                    <SelectValue placeholder="Selecione um produto do catálogo" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {sortedActiveProducts.length === 0 && (
+                                      <div className="px-2 py-1.5 text-xs text-gray-500">
+                                        Nenhum produto ativo no catálogo
+                                      </div>
+                                    )}
+                                    {sortedActiveProducts.map((p) => (
+                                      <SelectItem key={p.id} value={p.id}>
+                                        {p.name}
+                                      </SelectItem>
+                                    ))}
+                                    <SelectItem value={FREE_TEXT_OPTION}>
+                                      Outro (descrição livre)
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {(!editingItemDraft.productId) && (
+                                  <Input
+                                    value={editingItemDraft.descricao}
+                                    onChange={(e) => setEditingItemDraft({ ...editingItemDraft, descricao: e.target.value })}
+                                    placeholder="Descrição do item"
+                                    className="mt-2"
+                                  />
+                                )}
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
@@ -2268,12 +2360,43 @@ export default function LeadPJDetail() {
 
                 <div className="bg-white/80 dark:bg-gray-900/50 border border-green-200 dark:border-green-700 rounded-lg p-3 space-y-2">
                   <p className="text-xs font-semibold text-green-800 dark:text-green-300">Adicionar item</p>
-                  <Input
-                    value={newItem.descricao}
-                    onChange={(e) => setNewItem({ ...newItem, descricao: e.target.value })}
-                    placeholder="Descrição do produto/serviço"
-                    className="bg-white dark:bg-gray-800"
-                  />
+                  <div>
+                    <Select
+                      value={newItem.productId || (newItem.descricao ? FREE_TEXT_OPTION : '')}
+                      onValueChange={handleSelectProductForNew}
+                    >
+                      <SelectTrigger className="bg-white dark:bg-gray-800">
+                        <SelectValue placeholder={
+                          sortedActiveProducts.length === 0
+                            ? 'Cadastre produtos em Configurações'
+                            : 'Selecione um produto do catálogo'
+                        } />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sortedActiveProducts.length === 0 && (
+                          <div className="px-2 py-1.5 text-xs text-gray-500">
+                            Nenhum produto ativo cadastrado.
+                          </div>
+                        )}
+                        {sortedActiveProducts.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value={FREE_TEXT_OPTION}>
+                          Outro (descrição livre)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!newItem.productId && (
+                      <Input
+                        value={newItem.descricao}
+                        onChange={(e) => setNewItem({ ...newItem, descricao: e.target.value })}
+                        placeholder="Descrição do produto/serviço"
+                        className="bg-white dark:bg-gray-800 mt-2"
+                      />
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <Label className="text-xs text-gray-600 dark:text-gray-300">Quantidade</Label>
