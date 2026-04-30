@@ -363,6 +363,26 @@ for (const [route, options] of Object.entries(entities)) {
 
     router.put(`/${route}/:id`, authMiddleware, async (req, res) => {
       try {
+        // Task #65 — para notas comuns na timeline (type='note'), só o autor
+        // ou admin/coordenador podem editar. Demais tipos seguem o
+        // comportamento original (necessário para fluxos como marcar tarefa
+        // como concluída pelo agente responsável).
+        const existingForGate = await query(
+          'SELECT type, created_by FROM activities_pj WHERE id = $1',
+          [req.params.id]
+        );
+        if (existingForGate.rows.length === 0) {
+          return res.status(404).json({ message: 'Activity not found' });
+        }
+        const { type: existingType, created_by: existingCreatedBy } = existingForGate.rows[0];
+        if (existingType === 'note') {
+          const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+          const isFullVisibility = visibleIds === null;
+          if (!isFullVisibility && String(existingCreatedBy) !== String(req.user?.id)) {
+            return res.status(403).json({ message: 'Only the author can edit this note' });
+          }
+        }
+
         const originalJson = res.json.bind(res);
         await crud.update(req, {
           ...res,
@@ -395,8 +415,20 @@ for (const [route, options] of Object.entries(entities)) {
 
     router.delete(`/${route}/:id`, authMiddleware, async (req, res) => {
       try {
-        const existing = await query('SELECT created_by, google_event_id FROM activities_pj WHERE id = $1', [req.params.id]);
+        const existing = await query('SELECT type, created_by, google_event_id FROM activities_pj WHERE id = $1', [req.params.id]);
         const row = existing.rows[0];
+        if (!row) {
+          return res.status(404).json({ message: 'Activity not found' });
+        }
+        // Task #65 — mesma regra do PUT: notas só podem ser excluídas pelo
+        // autor ou admin/coordenador.
+        if (row.type === 'note') {
+          const visibleIds = await resolveVisibleAgentIds(req.user?.id);
+          const isFullVisibility = visibleIds === null;
+          if (!isFullVisibility && String(row.created_by) !== String(req.user?.id)) {
+            return res.status(403).json({ message: 'Only the author can delete this note' });
+          }
+        }
 
         const originalJson = res.json.bind(res);
         await crud.delete(req, {

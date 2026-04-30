@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { 
   Phone, 
@@ -14,11 +14,18 @@ import {
   Building2,
   Presentation,
   ArrowRight,
+  Pencil,
+  Trash2,
+  Save,
+  X,
+  UserCircle2,
 } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { base44 } from "@/api/base44Client";
 import { getAgentDisplayName } from "@/utils/agents";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 const formatDate = (dateValue) => {
   if (!dateValue) return "";
@@ -109,13 +116,44 @@ const getActivityConfig = (type) => {
   return configMap[type] || configMap.note;
 };
 
-export default function LeadPJTimeline({ activities, agents: agentsProp }) {
+export default function LeadPJTimeline({
+  activities,
+  agents: agentsProp,
+  currentAgent = null,
+  onEditNote = null,
+  onDeleteNote = null,
+  isUpdatingNote = false,
+}) {
   const { data: agentsFetched = [] } = useQuery({
     queryKey: ['agents'],
     queryFn: () => base44.entities.Agent.list(),
     enabled: !agentsProp,
   });
   const agents = agentsProp || agentsFetched;
+
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteContent, setEditingNoteContent] = useState("");
+
+  const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
+  const isAdmin = currentAgentType === 'admin';
+  const isCoordinator = currentAgentType === 'coordinator';
+
+  const startEditingNote = (activity) => {
+    setEditingNoteId(activity.id);
+    setEditingNoteContent(activity.description || "");
+  };
+  const cancelEditingNote = () => {
+    setEditingNoteId(null);
+    setEditingNoteContent("");
+  };
+  const saveEditingNote = async () => {
+    if (!onEditNote || !editingNoteId) return;
+    const content = (editingNoteContent || "").trim();
+    if (!content) return;
+    await onEditNote(editingNoteId, content);
+    setEditingNoteId(null);
+    setEditingNoteContent("");
+  };
 
   if (!activities || activities.length === 0) {
     return (
@@ -144,6 +182,13 @@ export default function LeadPJTimeline({ activities, agents: agentsProp }) {
           const Icon = config.icon;
           const isCompleted = activity.completed;
           const isNote = activity.type === 'note';
+          // Task #65 — autor real da atividade. created_by é o user_id do
+          // usuário logado no momento da criação (preenchido pelo backend).
+          const createdById = activity.createdBy || activity.created_by || null;
+          const isAuthor = !!(currentAgent && createdById && String(createdById) === String(currentAgent.id));
+          const canEditNote = isNote && (isAuthor || isAdmin || isCoordinator) && !!onEditNote;
+          const canDeleteNote = isNote && (isAuthor || isAdmin || isCoordinator) && !!onDeleteNote;
+          const isEditingThis = editingNoteId === activity.id;
 
           return (
             <div key={activity.id || idx} className="relative flex gap-4 group">
@@ -173,10 +218,40 @@ export default function LeadPJTimeline({ activities, agents: agentsProp }) {
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatDate(activity.createdAt || activity.created_at || activity.created_date)}
-                  </span>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {formatDate(activity.createdAt || activity.created_at || activity.created_date)}
+                    </span>
+                    {!isEditingThis && (canEditNote || canDeleteNote) && (
+                      <div className="flex items-center gap-1">
+                        {canEditNote && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400"
+                            title="Editar nota"
+                            onClick={() => startEditingNote(activity)}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {canDeleteNote && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-500 hover:text-red-600 dark:hover:text-red-400"
+                            title="Excluir nota"
+                            onClick={() => onDeleteNote(activity)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 {activity.title && (
@@ -185,10 +260,42 @@ export default function LeadPJTimeline({ activities, agents: agentsProp }) {
                   </h4>
                 )}
                 
-                {activity.description && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1.5 leading-relaxed whitespace-pre-wrap">
-                    {activity.description}
-                  </p>
+                {isEditingThis ? (
+                  <div className="space-y-2 mt-2">
+                    <Textarea
+                      value={editingNoteContent}
+                      onChange={(e) => setEditingNoteContent(e.target.value)}
+                      rows={3}
+                      className="resize-none"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={cancelEditingNote}
+                        disabled={isUpdatingNote}
+                      >
+                        <X className="w-3.5 h-3.5 mr-1" /> Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-indigo-600 hover:bg-indigo-700"
+                        onClick={saveEditingNote}
+                        disabled={isUpdatingNote || !editingNoteContent.trim()}
+                      >
+                        <Save className="w-3.5 h-3.5 mr-1" /> Salvar
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  activity.description && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1.5 leading-relaxed whitespace-pre-wrap">
+                      {activity.description}
+                    </p>
+                  )
                 )}
 
                 {(activity.scheduledAt || activity.scheduled_at) && !isCompleted && (
@@ -200,12 +307,21 @@ export default function LeadPJTimeline({ activities, agents: agentsProp }) {
                   </div>
                 )}
 
-                {(activity.assignedTo || activity.assigned_to) && (
-                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 flex-wrap">
-                    <User className="w-3.5 h-3.5 text-gray-400" />
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      Responsável: <span className="font-medium">{getAgentDisplayName(activity.assignedTo || activity.assigned_to, agents)}</span>
-                    </span>
+                {(isNote || createdById || activity.assignedTo || activity.assigned_to) && (
+                  <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 flex-wrap">
+                    {/* Notas sempre exibem "Autor"; demais tipos mostram só quando há created_by. */}
+                    {(createdById || isNote) && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                        <UserCircle2 className="w-3.5 h-3.5 text-gray-400" />
+                        Autor: <span className="font-medium">{createdById ? getAgentDisplayName(createdById, agents) : '—'}</span>
+                      </span>
+                    )}
+                    {(activity.assignedTo || activity.assigned_to) && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-gray-400" />
+                        Responsável: <span className="font-medium">{getAgentDisplayName(activity.assignedTo || activity.assigned_to, agents)}</span>
+                      </span>
+                    )}
                     {(activity.originalAssignedTo || activity.original_assigned_to) &&
                       String(activity.originalAssignedTo || activity.original_assigned_to) !==
                         String(activity.assignedTo || activity.assigned_to) && (

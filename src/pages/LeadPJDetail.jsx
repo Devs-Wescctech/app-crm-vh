@@ -590,6 +590,53 @@ export default function LeadPJDetail() {
     },
   });
 
+  // Task #65 — editar/excluir notas comuns na timeline. O backend impõe a
+  // mesma regra (autor OR admin/coord) e devolve 403 caso contrário.
+  const invalidateActivityCaches = () => {
+    queryClient.invalidateQueries({ queryKey: ['activitiesPJ', leadId] });
+    queryClient.invalidateQueries({ queryKey: ['activitiesPJ'] });
+    // LeadPJReportList usa um queryKey dedicado para a timeline em modal —
+    // garante consistência caso o modal já esteja aberto.
+    queryClient.invalidateQueries({ queryKey: ['activitiesPJ-modal', leadId] });
+  };
+
+  const updateActivityNoteMutation = useMutation({
+    mutationFn: ({ id, content }) =>
+      base44.entities.ActivityPJ.update(id, { description: content }),
+    onSuccess: () => {
+      invalidateActivityCaches();
+      toast.success('Nota atualizada!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao atualizar nota'),
+  });
+
+  const deleteActivityNoteMutation = useMutation({
+    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+    onSuccess: () => {
+      invalidateActivityCaches();
+      toast.success('Nota removida!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover nota'),
+  });
+
+  const handleEditTimelineNote = async (id, content) => {
+    await updateActivityNoteMutation.mutateAsync({ id, content });
+  };
+
+  const handleDeleteTimelineNote = (activity) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Remover nota?',
+      message: 'Esta ação não pode ser desfeita. Deseja realmente remover esta nota?',
+      confirmLabel: 'Remover',
+      variant: 'danger',
+      onConfirm: () => {
+        deleteActivityNoteMutation.mutate(activity.id);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
   const completeTaskMutation = useMutation({
     mutationFn: (taskId) => base44.entities.ActivityPJ.update(taskId, { completed: true, completed_at: new Date().toISOString() }),
     onSuccess: () => {
@@ -1377,7 +1424,14 @@ export default function LeadPJDetail() {
                     <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
                       <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Timeline de Atividades</h3>
                       <div className="max-h-[500px] overflow-y-auto">
-                        <LeadPJTimeline activities={activities} />
+                        <LeadPJTimeline
+                          activities={activities}
+                          agents={agents}
+                          currentAgent={user?.agent}
+                          onEditNote={handleEditTimelineNote}
+                          onDeleteNote={handleDeleteTimelineNote}
+                          isUpdatingNote={updateActivityNoteMutation.isPending}
+                        />
                       </div>
                     </div>
                   </CardContent>
