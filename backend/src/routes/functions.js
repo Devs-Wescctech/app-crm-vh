@@ -4986,10 +4986,13 @@ router.get(
       };
 
       // 2) Tabulação — derived from stage map. Fixed 6 categories in fixed order.
+      // Group by the coalesced expression so NULL stages merge into the same
+      // 'novo' bucket as real 'novo' rows (otherwise we'd emit two separate
+      // rows that both alias to label 'Novo' downstream).
       const stageGroupRes = await query(
         `SELECT COALESCE(l.stage, 'novo') AS stage, COUNT(*)::int AS qty
          FROM leads_pj l ${where}
-         GROUP BY l.stage`,
+         GROUP BY COALESCE(l.stage, 'novo')`,
         params
       );
       const tabBuckets = Object.fromEntries(TABULACAO_ORDER.map((k) => [k, 0]));

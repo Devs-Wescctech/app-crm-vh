@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ShieldX, RefreshCw } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { isSupervisorType } from "@/components/utils/permissions";
 
 const ACCENT = "#F98F6F";
 const ACCENT_DARK = "#E07050";
@@ -341,7 +342,7 @@ export default function DashboardComercial() {
     user?.role === "admin" ||
     agentType === "admin" ||
     agentType === "coordinator" ||
-    (typeof agentType === "string" && agentType.includes("supervisor"));
+    isSupervisorType(agentType);
 
   const filters = useMemo(() => ({ mes, ano, produto, tabulacao }), [mes, ano, produto, tabulacao]);
 
