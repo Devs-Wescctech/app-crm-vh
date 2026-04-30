@@ -332,7 +332,7 @@ export default function DashboardComercial() {
   const [produto, setProduto] = useState("all");
   const [tabulacao, setTabulacao] = useState("all");
 
-  const { data: user, isLoading: isUserLoading } = useQuery({
+  const { data: user, isLoading: isUserLoading, error: userError } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => base44.auth.me(),
   });
@@ -352,6 +352,29 @@ export default function DashboardComercial() {
     enabled: !!user && allowed,
     staleTime: 30000,
   });
+
+  // If we couldn't even load the current user (network error, expired token,
+  // backend down) show a clear failure state instead of an empty dashboard
+  // shell that the user can't make sense of.
+  if (!isUserLoading && (userError || !user)) {
+    return (
+      <div className="flex items-center justify-center h-screen" style={{ backgroundColor: "#0F1320" }}>
+        <Card className="max-w-md p-8 text-center border-0" style={{ backgroundColor: PANEL_BG, color: TEXT_BRIGHT }}>
+          <ShieldX className="w-16 h-16 mx-auto mb-4 text-red-400" />
+          <h2 className="text-xl font-bold mb-2">Não foi possível carregar seu usuário</h2>
+          <p className="text-sm mb-4" style={{ color: TEXT_MUTED }}>
+            Verifique sua conexão e faça login novamente. Se o problema persistir, contate o administrador.
+          </p>
+          <Button
+            onClick={() => window.location.reload()}
+            style={{ backgroundColor: ACCENT, color: "#0F1320" }}
+          >
+            <RefreshCw className="w-4 h-4 mr-2" /> Tentar novamente
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   if (!isUserLoading && user && !allowed) {
     return (
