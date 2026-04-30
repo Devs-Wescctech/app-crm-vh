@@ -4963,31 +4963,6 @@ router.get(
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-      // Trend condition set for "Lead/Mês": ignores mes/ano (otherwise the
-      // 12-month line would have 11 forced-zero months whenever the user
-      // selects a specific month), but still respects produto + tabulacao.
-      const trendConditions = [];
-      const trendParams = [];
-      let trendIdx = 1;
-      if (produto) {
-        trendConditions.push(
-          `EXISTS (SELECT 1 FROM lead_pj_proposal_items i WHERE i.lead_id = l.id AND i.product_id = $${trendIdx++})`
-        );
-        trendParams.push(produto);
-      }
-      if (tabulacao) {
-        const stages = Object.entries(TABULACAO_FROM_STAGE)
-          .filter(([, label]) => label === tabulacao)
-          .map(([stage]) => stage);
-        if (stages.length === 0) {
-          trendConditions.push('1 = 0');
-        } else {
-          const placeholders = stages.map(() => `$${trendIdx++}`).join(', ');
-          trendConditions.push(`l.stage IN (${placeholders})`);
-          trendParams.push(...stages);
-        }
-      }
-
       // 1) total leads + range
       const totalRes = await query(
         `SELECT COUNT(*)::int AS total,
@@ -5128,20 +5103,14 @@ router.get(
         value: row.qty,
       }));
 
-      // 9) Lead/Mês — rolling 12-month window. Anchored to the selected
-      // year (Dec/ano) when `ano` is provided, otherwise to the current
-      // month. Ignores `mes`/`ano` row-level filters (uses `trendConditions`)
-      // so the trend stays meaningful even when the user filters by a
-      // single month.
-      const anchorIdx = trendIdx; // placeholder slot for anchor month-start
-      const trendOnClause = trendConditions.length
-        ? 'AND ' + trendConditions.join(' AND ')
-        : '';
+      // 9) Lead/Mês — 12-month line. Window is anchored to Dec of the
+      // selected `ano` when provided, otherwise to the current month.
+      // Respects ALL filters (mes/ano/produto/tabulacao) per spec, so a
+      // narrow filter (e.g. mes=4) will legitimately show 11 zero months
+      // and the bar(s) only for the matching month(s).
       let anchorExpr;
-      const mesParams = [...trendParams];
       if (ano && ano >= 2000 && ano <= 2100) {
-        anchorExpr = `make_date($${anchorIdx}, 12, 1)`;
-        mesParams.push(ano);
+        anchorExpr = `make_date(${ano}, 12, 1)`;
       } else {
         anchorExpr = `date_trunc('month', NOW())::date`;
       }
@@ -5158,10 +5127,10 @@ router.get(
          FROM months m
          LEFT JOIN leads_pj l
            ON date_trunc('month', l.created_at) = m.month_start
-           ${trendOnClause}
+           ${where ? 'AND ' + conditions.join(' AND ') : ''}
          GROUP BY m.month_start
          ORDER BY m.month_start ASC`,
-        mesParams
+        params
       );
       const leadPorMesArr = mesRes.rows.map((row) => ({
         month: row.month,
