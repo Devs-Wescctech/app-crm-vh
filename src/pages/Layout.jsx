@@ -105,6 +105,7 @@ const menuModules = [
     items: [
       { title: "Dashboard", url: createPageUrl("SalesPJDashboard"), icon: LayoutDashboard },
       { title: "Dashboard Vendedores", url: createPageUrl("SalesPJAgentsDashboard"), icon: UserCheck, supervisorOnly: true },
+      { title: "Dashboard Comercial", url: createPageUrl("DashboardComercial"), icon: FileBarChart, supervisorOnly: true },
       { title: "Novo Lead PJ", url: createPageUrl("NewLeadPJ"), icon: Plus, highlight: true },
       { title: "Pipeline B2B", url: createPageUrl("LeadsPJKanban"), icon: TrendingUp },
       { title: "Agenda", url: createPageUrl("SalesAgenda"), icon: CalendarIcon },

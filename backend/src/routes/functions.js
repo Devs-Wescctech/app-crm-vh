@@ -4880,5 +4880,286 @@ router.get('/lead-temperature/monitor-runs', authMiddleware, loadAgentMiddleware
   }
 });
 
+// =====================================================================
+// Task #64 — Dashboard Comercial (estilo PowerBI)
+// Single endpoint that returns every block aggregate in one response.
+// =====================================================================
+const TABULACAO_FROM_STAGE = {
+  fechado_ganho: 'Convertido',
+  proposta_enviada: 'Analisando Proposta',
+  negociacao: 'Em Negociação',
+  qualificacao: 'Em Negociação',
+  apresentacao: 'Em Negociação',
+  novo: 'Sem Conversão',
+  fechado_perdido: 'Sem Conversão',
+};
+const TABULACAO_ORDER = [
+  'Sem Conversão',
+  'Em Negociação',
+  'Remarcar Call',
+  'Analisando Proposta',
+  'Repetido',
+  'Convertido',
+];
+
+function dashboardComercialAuthGate(req, res, next) {
+  const role = req.user?.role;
+  const type = req.agent?.agentType;
+  const allowed =
+    role === 'admin' ||
+    type === 'admin' ||
+    type === 'coordinator' ||
+    (typeof type === 'string' && type.includes('supervisor'));
+  if (!allowed) {
+    return res.status(403).json({ message: 'Acesso restrito ao dashboard comercial' });
+  }
+  return next();
+}
+
+router.get(
+  '/sales-pj-dashboard-comercial',
+  authMiddleware,
+  loadAgentMiddleware,
+  dashboardComercialAuthGate,
+  async (req, res) => {
+    try {
+      const mes = req.query.mes ? parseInt(req.query.mes, 10) : null;
+      const ano = req.query.ano ? parseInt(req.query.ano, 10) : null;
+      const produto = req.query.produto && req.query.produto !== 'all' ? req.query.produto : null;
+      const tabulacao = req.query.tabulacao && req.query.tabulacao !== 'all' ? req.query.tabulacao : null;
+
+      // Build common WHERE clause
+      const conditions = [];
+      const params = [];
+      let idx = 1;
+
+      if (mes && mes >= 1 && mes <= 12) {
+        conditions.push(`EXTRACT(MONTH FROM l.created_at) = $${idx++}`);
+        params.push(mes);
+      }
+      if (ano && ano >= 2000 && ano <= 2100) {
+        conditions.push(`EXTRACT(YEAR FROM l.created_at) = $${idx++}`);
+        params.push(ano);
+      }
+      if (produto) {
+        conditions.push(
+          `EXISTS (SELECT 1 FROM lead_pj_proposal_items i WHERE i.lead_id = l.id AND i.product_id = $${idx++})`
+        );
+        params.push(produto);
+      }
+      if (tabulacao) {
+        const stages = Object.entries(TABULACAO_FROM_STAGE)
+          .filter(([, label]) => label === tabulacao)
+          .map(([stage]) => stage);
+        if (stages.length === 0) {
+          // tabulacao requested but no stage maps to it (e.g. "Repetido") => empty result set
+          conditions.push('1 = 0');
+        } else {
+          const placeholders = stages.map(() => `$${idx++}`).join(', ');
+          conditions.push(`l.stage IN (${placeholders})`);
+          params.push(...stages);
+        }
+      }
+
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      // 1) total leads + range
+      const totalRes = await query(
+        `SELECT COUNT(*)::int AS total,
+                MIN(l.created_at) AS min_date,
+                MAX(l.created_at) AS max_date
+         FROM leads_pj l ${where}`,
+        params
+      );
+      const totalLeads = totalRes.rows[0]?.total || 0;
+      const totalRange = {
+        from: totalRes.rows[0]?.min_date || null,
+        to: totalRes.rows[0]?.max_date || null,
+      };
+
+      // 2) Tabulação — derived from stage map. Fixed 6 categories in fixed order.
+      const stageGroupRes = await query(
+        `SELECT COALESCE(l.stage, 'novo') AS stage, COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY l.stage`,
+        params
+      );
+      const tabBuckets = Object.fromEntries(TABULACAO_ORDER.map((k) => [k, 0]));
+      for (const row of stageGroupRes.rows) {
+        const label = TABULACAO_FROM_STAGE[row.stage] || 'Sem Conversão';
+        tabBuckets[label] = (tabBuckets[label] || 0) + row.qty;
+      }
+      const tabulacaoArr = TABULACAO_ORDER.map((label) => ({
+        label,
+        value: tabBuckets[label] || 0,
+        pct: totalLeads ? +(((tabBuckets[label] || 0) / totalLeads) * 100).toFixed(2) : 0,
+      }));
+
+      // 3) Etapa — distribution by stage (raw labels)
+      const stageLabelMap = {
+        novo: 'Novo',
+        qualificacao: 'Qualificação',
+        apresentacao: 'Apresentação',
+        proposta_enviada: 'Proposta Enviada',
+        negociacao: 'Negociação',
+        fechado_ganho: 'Fechado Ganho',
+        fechado_perdido: 'Perdido',
+      };
+      const etapaArr = stageGroupRes.rows
+        .map((row) => ({
+          label: stageLabelMap[row.stage] || row.stage || 'Sem Estágio',
+          value: row.qty,
+          pct: totalLeads ? +((row.qty / totalLeads) * 100).toFixed(2) : 0,
+        }))
+        .sort((a, b) => b.value - a.value);
+
+      // 4) Produto — count distinct leads grouped by product
+      const produtoRes = await query(
+        `SELECT COALESCE(p.name, 'Sem Produto') AS label,
+                COUNT(DISTINCT l.id)::int AS qty
+         FROM leads_pj l
+         LEFT JOIN lead_pj_proposal_items i ON i.lead_id = l.id
+         LEFT JOIN products p ON p.id = i.product_id
+         ${where}
+         GROUP BY p.name
+         ORDER BY qty DESC
+         LIMIT 20`,
+        params
+      );
+      const produtoArr = produtoRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+      }));
+
+      // 5) Origem — % by source
+      const origemRes = await query(
+        `SELECT COALESCE(NULLIF(TRIM(l.source), ''), 'Não informado') AS label,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY label
+         ORDER BY qty DESC
+         LIMIT 20`,
+        params
+      );
+      const origemArr = origemRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+        pct: totalLeads ? +((row.qty / totalLeads) * 100).toFixed(2) : 0,
+      }));
+
+      // 6) Lead Empresa — top empresas
+      const empresaRes = await query(
+        `SELECT COALESCE(
+                  NULLIF(TRIM(l.razao_social), ''),
+                  NULLIF(TRIM(l.nome_fantasia), ''),
+                  'SEM IDENTIFICAÇÃO'
+                ) AS label,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY label
+         ORDER BY qty DESC
+         LIMIT 100`,
+        params
+      );
+      const leadEmpresaArr = empresaRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+      }));
+
+      // 7) Lead Nome — top contact names
+      const nomeRes = await query(
+        `SELECT COALESCE(NULLIF(TRIM(l.contact_name), ''), 'SEM IDENTIFICAÇÃO') AS label,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY label
+         ORDER BY qty DESC
+         LIMIT 100`,
+        params
+      );
+      const leadNomeArr = nomeRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+      }));
+
+      // 8) Cargo declarado — using contact_role
+      const cargoRes = await query(
+        `SELECT COALESCE(NULLIF(TRIM(l.contact_role), ''), 'Outro') AS label,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY label
+         ORDER BY qty DESC
+         LIMIT 50`,
+        params
+      );
+      const cargoArr = cargoRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+      }));
+
+      // 9) Lead/Mês — last 12 months from MAX(created_at) or NOW()
+      const mesRes = await query(
+        `WITH months AS (
+           SELECT generate_series(
+             date_trunc('month', NOW()) - INTERVAL '11 months',
+             date_trunc('month', NOW()),
+             INTERVAL '1 month'
+           ) AS month_start
+         )
+         SELECT to_char(m.month_start, 'YYYY-MM') AS month,
+                COUNT(l.id)::int AS qty
+         FROM months m
+         LEFT JOIN leads_pj l
+           ON date_trunc('month', l.created_at) = m.month_start
+           ${where ? 'AND ' + conditions.join(' AND ') : ''}
+         GROUP BY m.month_start
+         ORDER BY m.month_start ASC`,
+        params
+      );
+      const leadPorMesArr = mesRes.rows.map((row) => ({
+        month: row.month,
+        value: row.qty,
+      }));
+
+      // 10) Leads/Dia — daily counts within filter range
+      const diaRes = await query(
+        `SELECT to_char(date_trunc('day', l.created_at), 'YYYY-MM-DD') AS day,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY day
+         ORDER BY day ASC`,
+        params
+      );
+      const leadsPorDiaArr = diaRes.rows.map((row) => ({
+        day: row.day,
+        value: row.qty,
+      }));
+
+      // Available products for the filter dropdown
+      const productsRes = await query(
+        `SELECT id, name FROM products WHERE active = true ORDER BY name ASC`
+      );
+
+      res.json({
+        totalLeads,
+        totalRange,
+        tabulacao: tabulacaoArr,
+        etapa: etapaArr,
+        produto: produtoArr,
+        origem: origemArr,
+        leadEmpresa: leadEmpresaArr,
+        leadNome: leadNomeArr,
+        cargoDeclarado: cargoArr,
+        leadPorMes: leadPorMesArr,
+        leadsPorDia: leadsPorDiaArr,
+        availableProducts: productsRes.rows,
+        availableTabulacoes: TABULACAO_ORDER,
+      });
+    } catch (error) {
+      console.error('[Dashboard Comercial] erro:', error);
+      res.status(500).json({ message: 'Erro ao carregar dashboard', error: error.message });
+    }
+  }
+);
+
 
 export default router;

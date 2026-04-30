@@ -4,6 +4,7 @@ import Login from "./Login";
 
 import SalesPJDashboard from "./SalesPJDashboard";
 import SalesPJAgentsDashboard from "./SalesPJAgentsDashboard";
+import DashboardComercial from "./DashboardComercial";
 import MyDashboardPJ from "./MyDashboardPJ";
 import NewLeadPJ from "./NewLeadPJ";
 import LeadsPJKanban from "./LeadsPJKanban";
@@ -60,6 +61,7 @@ const PAGES = {
 
     SalesPJDashboard: SalesPJDashboard,
     SalesPJAgentsDashboard: SalesPJAgentsDashboard,
+    DashboardComercial: DashboardComercial,
     MyDashboardPJ: MyDashboardPJ,
     NewLeadPJ: NewLeadPJ,
     LeadsPJKanban: LeadsPJKanban,
@@ -114,6 +116,7 @@ function PagesContent() {
 
                 <Route path="/SalesPJDashboard" element={<SalesPJDashboard />} />
                 <Route path="/SalesPJAgentsDashboard" element={<SalesPJAgentsDashboard />} />
+                <Route path="/DashboardComercial" element={<DashboardComercial />} />
                 <Route path="/MyDashboardPJ" element={<MyDashboardPJ />} />
                 <Route path="/NewLeadPJ" element={<NewLeadPJ />} />
                 <Route path="/LeadsPJKanban" element={<LeadsPJKanban />} />
