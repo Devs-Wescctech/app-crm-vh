@@ -59,6 +59,7 @@ export default function SalesPJLostReport() {
   const [searchText, setSearchText] = useState("");
   const [selectedSource, setSelectedSource] = useState(null);
   const [selectedSegment, setSelectedSegment] = useState(null);
+  const [selectedLostReason, setSelectedLostReason] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [reopenDialog, setReopenDialog] = useState(null);
 
@@ -140,6 +141,15 @@ export default function SalesPJLostReport() {
     return [...s].sort();
   }, [leadsPJ]);
 
+  const availableLostReasons = useMemo(() => {
+    const s = new Set();
+    leadsPJ.forEach(l => {
+      const r = l.lostReason || l.lost_reason;
+      if (r) s.add(r);
+    });
+    return [...s].sort();
+  }, [leadsPJ]);
+
   const visibleAgents = useMemo(() => {
     return getVisibleAgentsForFilter(currentAgent, allAgents, teams);
   }, [currentAgent, allAgents, teams]);
@@ -195,9 +205,14 @@ export default function SalesPJLostReport() {
       if (selectedSource && lead.source !== selectedSource) return false;
       if (selectedSegment && lead.segment !== selectedSegment) return false;
 
+      if (selectedLostReason) {
+        const reason = lead.lostReason || lead.lost_reason || '';
+        if (reason !== selectedLostReason) return false;
+      }
+
       return true;
     });
-  }, [leadsPJ, searchText, dateRange, selectedAgent, selectedTeam, selectedSource, selectedSegment, displayAgents]);
+  }, [leadsPJ, searchText, dateRange, selectedAgent, selectedTeam, selectedSource, selectedSegment, selectedLostReason, displayAgents]);
 
   const getLeadValue = (l) => parseFloat(l.value) || parseFloat(l.monthlyValue) || parseFloat(l.monthly_value) || 0;
   const totalRegistros = filteredLeads.length;
@@ -224,6 +239,7 @@ export default function SalesPJLostReport() {
     setSearchText("");
     setSelectedSource(null);
     setSelectedSegment(null);
+    setSelectedLostReason(null);
     setCurrentPage(1);
   };
 
@@ -237,9 +253,11 @@ export default function SalesPJLostReport() {
       [`Período: ${periodLabel}`],
       [`Total: ${totalRegistros} | Valor Total: R$ ${(valorTotal || 0).toFixed(2)} | Ticket Médio: R$ ${(ticketMedio || 0).toFixed(2)}`],
       [''],
-      ['Razão Social', 'Nome Fantasia', 'CNPJ', 'Contato', 'Telefone', 'Segmento', 'Valor', 'Motivo Perda', 'Agente', 'Dt. Criação', 'Dt. Atualização'],
+      ['Razão Social', 'Nome Fantasia', 'CNPJ', 'Contato', 'Telefone', 'Segmento', 'Valor', 'Motivo Perda', 'Agente', 'Dt. Criação', 'Dt. Perda'],
       ...filteredLeads.map(lead => {
         const agent = agentMap[lead.agentId || lead.agent_id];
+        const createdRaw = lead.createdAt || lead.created_at;
+        const lostRaw = lead.updatedAt || lead.updated_at || createdRaw;
         return [
           lead.razaoSocial || lead.razao_social || '',
           lead.nomeFantasia || lead.nome_fantasia || '',
@@ -250,8 +268,8 @@ export default function SalesPJLostReport() {
           `R$ ${getLeadValue(lead).toFixed(2)}`,
           lead.lostReason || lead.lost_reason || '',
           agent?.name || '',
-          lead.createdAt ? format(new Date(lead.createdAt), 'dd/MM/yyyy', { locale: ptBR }) : '',
-          lead.updatedAt ? format(new Date(lead.updatedAt), 'dd/MM/yyyy', { locale: ptBR }) : '',
+          createdRaw ? format(new Date(createdRaw), 'dd/MM/yyyy', { locale: ptBR }) : '',
+          lostRaw ? format(new Date(lostRaw), 'dd/MM/yyyy', { locale: ptBR }) : '',
         ];
       }),
     ].map(row => row.join(';')).join('\n');
@@ -341,6 +359,15 @@ export default function SalesPJLostReport() {
             <SelectContent>
               <SelectItem value="all">Todos segmentos</SelectItem>
               {segments.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {availableLostReasons.length > 0 && (
+          <Select value={selectedLostReason || "all"} onValueChange={v => { setSelectedLostReason(v === "all" ? null : v); setCurrentPage(1); }}>
+            <SelectTrigger className="w-[200px] bg-white dark:bg-gray-900"><SelectValue placeholder="Motivo da perda" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os motivos</SelectItem>
+              {availableLostReasons.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
             </SelectContent>
           </Select>
         )}
@@ -477,7 +504,7 @@ export default function SalesPJLostReport() {
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Valor</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Motivo</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Agente</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Dt. Criação</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Dt. Perda</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ações</th>
                 </tr>
               </thead>
@@ -497,8 +524,13 @@ export default function SalesPJLostReport() {
                 ) : (
                   paginatedLeads.map(lead => {
                     const agent = agentMap[lead.agentId || lead.agent_id];
+                    const lostDate = lead.updatedAt || lead.updated_at || lead.createdAt;
                     return (
-                      <tr key={lead.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <tr
+                        key={lead.id}
+                        onClick={() => navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`)}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                      >
                         <td className="px-4 py-3 whitespace-nowrap">
                           <p className="font-medium text-gray-900 dark:text-gray-100">{lead.razaoSocial || lead.razao_social || '-'}</p>
                         </td>
@@ -515,14 +547,17 @@ export default function SalesPJLostReport() {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-gray-700 dark:text-gray-300">{agent?.name || '-'}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-center text-gray-600 dark:text-gray-400">
-                          {lead.createdAt ? format(new Date(lead.createdAt), 'dd/MM/yy', { locale: ptBR }) : '-'}
+                          {lostDate ? format(new Date(lostDate), 'dd/MM/yy', { locale: ptBR }) : '-'}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`);
+                              }}
                               className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
                             >
                               <Eye className="w-4 h-4 mr-1" />
@@ -531,7 +566,10 @@ export default function SalesPJLostReport() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setReopenDialog(lead)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReopenDialog(lead);
+                              }}
                               className="text-green-600 hover:text-green-800 dark:text-green-400"
                             >
                               <RotateCcw className="w-4 h-4 mr-1" />

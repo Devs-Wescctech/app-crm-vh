@@ -452,7 +452,11 @@ export default function SalesPJWonReport() {
                     const currentAgentRow = agentMap[currentAgentId];
                     const convertedDate = lead.convertedAt || lead.converted_at;
                     return (
-                      <tr key={lead.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <tr
+                        key={lead.id}
+                        onClick={() => navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`)}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                      >
                         <td className="px-4 py-3 whitespace-nowrap">
                           <p className="font-medium text-gray-900 dark:text-gray-100">{lead.razaoSocial || lead.razao_social || '-'}</p>
                         </td>
@@ -489,7 +493,10 @@ export default function SalesPJWonReport() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`${createPageUrl("LeadPJDetail")}?id=${lead.id}`);
+                            }}
                             className="text-blue-600 hover:text-blue-800 dark:text-blue-400"
                           >
                             <Eye className="w-4 h-4 mr-1" />

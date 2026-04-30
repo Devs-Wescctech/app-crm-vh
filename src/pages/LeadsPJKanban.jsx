@@ -39,7 +39,8 @@ import {
   Trophy,
   Eye,
   EyeOff,
-  Snowflake
+  Snowflake,
+  XCircle
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -1170,6 +1171,26 @@ export default function LeadsPJKanban() {
               >
                 {coldLeadsCount}
               </Badge>
+            </Button>
+            <Button
+              variant="glass"
+              onClick={() => navigate(createPageUrl('SalesPJWonReport'))}
+              size="sm"
+              className="flex-1 sm:flex-none text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+              title="Ver lista de leads ganhos"
+            >
+              <Trophy className="w-4 h-4 sm:mr-2 text-emerald-600 dark:text-emerald-400" />
+              <span className="hidden sm:inline">Ver Ganhos</span>
+            </Button>
+            <Button
+              variant="glass"
+              onClick={() => navigate(createPageUrl('SalesPJLostReport'))}
+              size="sm"
+              className="flex-1 sm:flex-none text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
+              title="Ver lista de leads perdidos"
+            >
+              <XCircle className="w-4 h-4 sm:mr-2 text-red-600 dark:text-red-400" />
+              <span className="hidden sm:inline">Ver Perdidos</span>
             </Button>
             <Button
               variant="glass"
