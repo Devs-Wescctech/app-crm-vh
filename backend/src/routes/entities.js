@@ -323,8 +323,13 @@ for (const [route, options] of Object.entries(entities)) {
 
     router.post(`/${route}`, authMiddleware, async (req, res) => {
       try {
-        if (!req.body.created_by && !req.body.createdBy && req.user?.id) {
+        // Task #65 — author stamping é sempre o usuário do JWT, ignorando
+        // qualquer created_by/createdBy enviado pelo cliente para evitar
+        // spoofing de autoria. snake_case é o que o CRUD persiste, então
+        // removemos o camelCase para evitar conflito de chaves.
+        if (req.user?.id) {
           req.body.created_by = req.user.id;
+          delete req.body.createdBy;
         }
         const originalStatus = res.status.bind(res);
         await crud.create(req, {
