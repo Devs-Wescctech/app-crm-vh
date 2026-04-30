@@ -79,7 +79,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import NotificationBell from "@/components/ui/notification-bell";
-import { filterMenuItems, hasAnySystemsAccess } from "@/components/utils/permissions";
+import { filterMenuItems, hasAnySystemsAccess, isSupervisorType } from "@/components/utils/permissions";
 
 const PUBLIC_PAGES = [
   'Login', 'login', 'PublicSignature', 'PublicProposal',
@@ -668,7 +668,7 @@ function LayoutContent({ children, currentPageName }) {
   const currentAgentType = currentAgent?.agentType || currentAgent?.agent_type;
   const isAdminUser = user?.role === 'admin' || currentAgentType === 'admin';
   const isCoordinatorUser = currentAgentType === 'coordinator';
-  const isSupervisorUser = currentAgentType?.includes('supervisor');
+  const isSupervisorUser = isSupervisorType(currentAgentType);
   const isCommercialUser = !isAdminUser && !isCoordinatorUser && !isSupervisorUser && !!currentAgent;
 
   const filteredMenuModules = useMemo(() => {
