@@ -396,7 +396,7 @@ export default function DashboardComercial() {
               onChange={setProduto}
               options={[
                 { value: "all", label: "Todos os produtos" },
-                ...((data?.availableProducts || []).map((p) => ({ value: p.id, label: p.name }))),
+                ...((data?.availableProducts || []).map((p) => ({ value: String(p.id), label: p.name }))),
               ]}
             />
             <FilterSelect

@@ -4905,11 +4905,19 @@ const TABULACAO_ORDER = [
 function dashboardComercialAuthGate(req, res, next) {
   const role = req.user?.role;
   const type = req.agent?.agentType;
+  // Mirror the canonical supervisor predicate from backend/src/routes/auth.js
+  // and src/components/utils/permissions.jsx#isSupervisorType so we don't
+  // accidentally admit unrelated agent types whose name happens to contain
+  // the substring "supervisor".
+  const isSupervisorType =
+    type === 'supervisor' ||
+    type === 'sales_supervisor' ||
+    (typeof type === 'string' && type.endsWith('_supervisor'));
   const allowed =
     role === 'admin' ||
     type === 'admin' ||
     type === 'coordinator' ||
-    (typeof type === 'string' && type.includes('supervisor'));
+    isSupervisorType;
   if (!allowed) {
     return res.status(403).json({ message: 'Acesso restrito ao dashboard comercial' });
   }
