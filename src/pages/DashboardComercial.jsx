@@ -27,10 +27,6 @@ import { isSupervisorType } from "@/components/utils/permissions";
 
 const ACCENT = "#F98F6F";
 const ACCENT_DARK = "#E07050";
-const PANEL_BG = "#1E2433";
-const PANEL_BORDER = "#2A3142";
-const TEXT_MUTED = "#9AA3B5";
-const TEXT_BRIGHT = "#E5E9F2";
 
 const MESES = [
   { value: "all", label: "Todos os meses" },
@@ -93,10 +89,7 @@ function fetchDashboard(params) {
 
 function PanelTitle({ children }) {
   return (
-    <h3
-      className="text-[11px] font-semibold tracking-[0.2em] uppercase mb-3"
-      style={{ color: TEXT_MUTED }}
-    >
+    <h3 className="text-[11px] font-semibold tracking-[0.2em] uppercase mb-3 text-gray-500 dark:text-gray-400">
       {children}
     </h3>
   );
@@ -104,10 +97,7 @@ function PanelTitle({ children }) {
 
 function Panel({ title, children, className = "", padding = "p-4" }) {
   return (
-    <Card
-      className={`${padding} border-0 ${className}`}
-      style={{ backgroundColor: PANEL_BG, color: TEXT_BRIGHT }}
-    >
+    <Card className={`${padding} border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 ${className}`}>
       {title && <PanelTitle>{title}</PanelTitle>}
       {children}
     </Card>
@@ -116,7 +106,7 @@ function Panel({ title, children, className = "", padding = "p-4" }) {
 
 function BarList({ data, page = 0, pageSize = 8, showPct = true }) {
   if (!data || data.length === 0) {
-    return <div className="text-xs py-6 text-center" style={{ color: TEXT_MUTED }}>Sem dados</div>;
+    return <div className="text-xs py-6 text-center text-gray-400 dark:text-gray-500">Sem dados</div>;
   }
   const max = Math.max(...data.map((d) => d.value), 1);
   const slice = data.slice(page * pageSize, page * pageSize + pageSize);
@@ -127,21 +117,20 @@ function BarList({ data, page = 0, pageSize = 8, showPct = true }) {
         return (
           <li
             key={`${row.label}-${i}`}
-            className="relative flex items-center justify-between text-xs px-2 py-1.5 rounded overflow-hidden"
-            style={{ backgroundColor: "#252B3B" }}
+            className="relative flex items-center justify-between text-xs px-2 py-1.5 rounded overflow-hidden bg-gray-100 dark:bg-gray-800"
           >
             <div
-              className="absolute inset-y-0 left-0 transition-all"
+              className="absolute inset-y-0 left-0 transition-all rounded"
               style={{
                 width: `${widthPct}%`,
                 backgroundColor: ACCENT,
-                opacity: 0.85,
+                opacity: 0.8,
               }}
             />
-            <span className="relative truncate pr-2" style={{ color: "#0F1320", fontWeight: 600 }}>
+            <span className="relative truncate pr-2 font-semibold text-gray-900 dark:text-gray-100">
               {row.label}
             </span>
-            <span className="relative ml-auto text-[11px] font-mono" style={{ color: "#0F1320", fontWeight: 700 }}>
+            <span className="relative ml-auto text-[11px] font-mono font-bold text-gray-900 dark:text-gray-100">
               {showPct && row.pct !== undefined ? `${row.pct.toFixed(2).replace(".", ",")}%` : row.value}
             </span>
           </li>
@@ -164,18 +153,18 @@ function ListPaged({ items, pageSize = 8, showPct = false }) {
         <BarList data={items || []} page={safePage} pageSize={pageSize} showPct={showPct} />
       </div>
       {(items?.length || 0) > 0 && (
-        <div className="flex items-center justify-between mt-2 text-[10px]" style={{ color: TEXT_MUTED }}>
+        <div className="flex items-center justify-between mt-2 text-[10px] text-gray-400 dark:text-gray-500">
           <span>{`${start} - ${end} / ${items.length}`}</span>
           <div className="flex items-center gap-1">
             <button
-              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-30"
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={safePage === 0}
             >
               ‹
             </button>
             <button
-              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-30"
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30"
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={safePage >= totalPages - 1}
             >
@@ -188,9 +177,23 @@ function ListPaged({ items, pageSize = 8, showPct = false }) {
   );
 }
 
+function useChartColors() {
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  return {
+    tickFill: isDark ? "#9CA3AF" : "#6B7280",
+    labelFill: isDark ? "#E5E7EB" : "#374151",
+    tooltipBg: isDark ? "#1F2937" : "#FFFFFF",
+    tooltipBorder: isDark ? "#374151" : "#E5E7EB",
+    tooltipText: isDark ? "#E5E7EB" : "#111827",
+    gridStroke: isDark ? "#374151" : "#E5E7EB",
+    cursorFill: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)",
+  };
+}
+
 function ProductBars({ data }) {
+  const cc = useChartColors();
   if (!data || data.length === 0) {
-    return <div className="text-xs py-6 text-center" style={{ color: TEXT_MUTED }}>Sem dados</div>;
+    return <div className="text-xs py-6 text-center text-gray-400 dark:text-gray-500">Sem dados</div>;
   }
   const top = data.slice(0, 7);
   return (
@@ -198,7 +201,7 @@ function ProductBars({ data }) {
       <BarChart data={top} margin={{ top: 18, right: 6, left: 6, bottom: 18 }}>
         <XAxis
           dataKey="label"
-          tick={{ fill: TEXT_MUTED, fontSize: 9 }}
+          tick={{ fill: cc.tickFill, fontSize: 9 }}
           interval={0}
           angle={-15}
           textAnchor="end"
@@ -206,17 +209,17 @@ function ProductBars({ data }) {
         />
         <YAxis hide />
         <Tooltip
-          cursor={{ fill: "rgba(255,255,255,0.05)" }}
+          cursor={{ fill: cc.cursorFill }}
           contentStyle={{
-            backgroundColor: PANEL_BG,
-            border: `1px solid ${PANEL_BORDER}`,
+            backgroundColor: cc.tooltipBg,
+            border: `1px solid ${cc.tooltipBorder}`,
             borderRadius: 6,
-            color: TEXT_BRIGHT,
+            color: cc.tooltipText,
             fontSize: 11,
           }}
         />
         <Bar dataKey="value" fill={ACCENT} radius={[2, 2, 0, 0]}>
-          <LabelList dataKey="value" position="top" fill={TEXT_BRIGHT} fontSize={10} />
+          <LabelList dataKey="value" position="top" fill={cc.labelFill} fontSize={10} />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -224,8 +227,9 @@ function ProductBars({ data }) {
 }
 
 function MonthLine({ data }) {
+  const cc = useChartColors();
   if (!data || data.length === 0) {
-    return <div className="text-xs py-6 text-center" style={{ color: TEXT_MUTED }}>Sem dados</div>;
+    return <div className="text-xs py-6 text-center text-gray-400 dark:text-gray-500">Sem dados</div>;
   }
   const display = data.map((d) => ({ ...d, monthLabel: formatMonthLabel(d.month) }));
   return (
@@ -233,7 +237,7 @@ function MonthLine({ data }) {
       <LineChart data={display} margin={{ top: 18, right: 12, left: 6, bottom: 18 }}>
         <XAxis
           dataKey="monthLabel"
-          tick={{ fill: TEXT_MUTED, fontSize: 9 }}
+          tick={{ fill: cc.tickFill, fontSize: 9 }}
           interval={0}
           height={32}
           angle={-20}
@@ -242,10 +246,10 @@ function MonthLine({ data }) {
         <YAxis hide />
         <Tooltip
           contentStyle={{
-            backgroundColor: PANEL_BG,
-            border: `1px solid ${PANEL_BORDER}`,
+            backgroundColor: cc.tooltipBg,
+            border: `1px solid ${cc.tooltipBorder}`,
             borderRadius: 6,
-            color: TEXT_BRIGHT,
+            color: cc.tooltipText,
             fontSize: 11,
           }}
         />
@@ -257,7 +261,7 @@ function MonthLine({ data }) {
           dot={{ fill: ACCENT, r: 3 }}
           activeDot={{ r: 5 }}
         >
-          <LabelList dataKey="value" position="top" fill={TEXT_BRIGHT} fontSize={10} />
+          <LabelList dataKey="value" position="top" fill={cc.labelFill} fontSize={10} />
         </Line>
       </LineChart>
     </ResponsiveContainer>
@@ -265,20 +269,20 @@ function MonthLine({ data }) {
 }
 
 function DayLine({ data }) {
+  const cc = useChartColors();
   if (!data || data.length === 0) {
-    return <div className="text-sm py-12 text-center" style={{ color: TEXT_MUTED }}>Sem dados no período</div>;
+    return <div className="text-sm py-12 text-center text-gray-400 dark:text-gray-500">Sem dados no período</div>;
   }
   const display = data.map((d) => ({ ...d, dayLabel: formatDayLabel(d.day) }));
-  // tick density: ~12 ticks
   const tickStep = Math.max(1, Math.floor(display.length / 12));
   const tickValues = display.filter((_, i) => i % tickStep === 0).map((d) => d.dayLabel);
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={display} margin={{ top: 24, right: 24, left: 12, bottom: 28 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#2A3142" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={cc.gridStroke} vertical={false} />
         <XAxis
           dataKey="dayLabel"
-          tick={{ fill: TEXT_MUTED, fontSize: 10 }}
+          tick={{ fill: cc.tickFill, fontSize: 10 }}
           ticks={tickValues}
           interval={0}
           height={36}
@@ -286,10 +290,10 @@ function DayLine({ data }) {
         <YAxis hide />
         <Tooltip
           contentStyle={{
-            backgroundColor: PANEL_BG,
-            border: `1px solid ${PANEL_BORDER}`,
+            backgroundColor: cc.tooltipBg,
+            border: `1px solid ${cc.tooltipBorder}`,
             borderRadius: 6,
-            color: TEXT_BRIGHT,
+            color: cc.tooltipText,
             fontSize: 11,
           }}
         />
@@ -304,17 +308,16 @@ function DayLine({ data }) {
           <LabelList
             dataKey="value"
             position="top"
-            fill={TEXT_BRIGHT}
+            fill={cc.labelFill}
             fontSize={9}
             content={({ x, y, value, index }) => {
-              // only label local peaks to avoid clutter
               if (!display[index]) return null;
               const v = Number(value) || 0;
               const prev = display[index - 1]?.value || 0;
               const next = display[index + 1]?.value || 0;
               if (v <= prev || v <= next || v < 2) return null;
               return (
-                <text x={x} y={y - 4} fill={TEXT_BRIGHT} fontSize={9} textAnchor="middle">
+                <text x={x} y={y - 4} fill={cc.labelFill} fontSize={9} textAnchor="middle">
                   {v}
                 </text>
               );
@@ -353,21 +356,18 @@ export default function DashboardComercial() {
     staleTime: 30000,
   });
 
-  // If we couldn't even load the current user (network error, expired token,
-  // backend down) show a clear failure state instead of an empty dashboard
-  // shell that the user can't make sense of.
   if (!isUserLoading && (userError || !user)) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ backgroundColor: "#0F1320" }}>
-        <Card className="max-w-md p-8 text-center border-0" style={{ backgroundColor: PANEL_BG, color: TEXT_BRIGHT }}>
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-950">
+        <Card className="max-w-md p-8 text-center border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
           <ShieldX className="w-16 h-16 mx-auto mb-4 text-red-400" />
-          <h2 className="text-xl font-bold mb-2">Não foi possível carregar seu usuário</h2>
-          <p className="text-sm mb-4" style={{ color: TEXT_MUTED }}>
+          <h2 className="text-xl font-bold mb-2 text-gray-900 dark:text-gray-100">Não foi possível carregar seu usuário</h2>
+          <p className="text-sm mb-4 text-gray-500 dark:text-gray-400">
             Verifique sua conexão e faça login novamente. Se o problema persistir, contate o administrador.
           </p>
           <Button
             onClick={() => window.location.reload()}
-            style={{ backgroundColor: ACCENT, color: "#0F1320" }}
+            style={{ backgroundColor: ACCENT, color: "#fff" }}
           >
             <RefreshCw className="w-4 h-4 mr-2" /> Tentar novamente
           </Button>
@@ -378,11 +378,11 @@ export default function DashboardComercial() {
 
   if (!isUserLoading && user && !allowed) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ backgroundColor: "#0F1320" }}>
-        <Card className="max-w-md p-8 text-center border-0" style={{ backgroundColor: PANEL_BG, color: TEXT_BRIGHT }}>
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-950">
+        <Card className="max-w-md p-8 text-center border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
           <ShieldX className="w-16 h-16 mx-auto mb-4 text-red-400" />
-          <h2 className="text-xl font-bold mb-2">Acesso restrito</h2>
-          <p className="text-sm" style={{ color: TEXT_MUTED }}>
+          <h2 className="text-xl font-bold mb-2 text-gray-900 dark:text-gray-100">Acesso restrito</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             O Dashboard Comercial está disponível apenas para administradores, coordenadores e supervisores.
           </p>
         </Card>
@@ -400,9 +400,8 @@ export default function DashboardComercial() {
   ];
 
   return (
-    <div className="min-h-screen p-4 md:p-6" style={{ backgroundColor: "#0F1320" }}>
+    <div className="min-h-screen p-4 md:p-6 bg-gray-50 dark:bg-gray-950">
       <div className="grid grid-cols-12 gap-4">
-        {/* Sidebar with title + filters */}
         <aside className="col-span-12 lg:col-span-2 space-y-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full border-2" style={{ borderColor: ACCENT }} />
@@ -441,8 +440,7 @@ export default function DashboardComercial() {
                 setProduto("all");
                 setTabulacao("all");
               }}
-              className="w-full text-xs"
-              style={{ color: TEXT_MUTED }}
+              className="w-full text-xs text-gray-500 dark:text-gray-400"
             >
               Limpar filtros
             </Button>
@@ -453,9 +451,7 @@ export default function DashboardComercial() {
           </Panel>
         </aside>
 
-        {/* Main grid */}
         <main className="col-span-12 lg:col-span-10 space-y-4">
-          {/* Row 1: Total / Produto / Origem / Lead Mês */}
           <div className="grid grid-cols-12 gap-4">
             <Panel title="Total Leads" className="col-span-12 md:col-span-3 lg:col-span-2">
               <div className="flex flex-col items-center justify-center py-3">
@@ -478,7 +474,6 @@ export default function DashboardComercial() {
             </Panel>
           </div>
 
-          {/* Row 2: Etapa / Empresa / Nome / Cargo */}
           <div className="grid grid-cols-12 gap-4">
             <Panel title="Etapa" className="col-span-12 md:col-span-6 lg:col-span-3">
               <ListPaged items={data?.etapa || []} pageSize={9} showPct />
@@ -497,13 +492,12 @@ export default function DashboardComercial() {
             </Panel>
           </div>
 
-          {/* Row 3: Leads/Dia full-width */}
           <Panel title="Leads/Dia" padding="p-4">
             <DayLine data={data?.leadsPorDia} />
           </Panel>
 
           {error && (
-            <div className="text-sm text-red-400 flex items-center gap-2">
+            <div className="text-sm text-red-500 dark:text-red-400 flex items-center gap-2">
               <span>Erro: {error.message}</span>
               <button
                 className="underline inline-flex items-center gap-1"
@@ -514,7 +508,7 @@ export default function DashboardComercial() {
             </div>
           )}
           {isFetching && !isLoading && (
-            <div className="text-[11px] text-right" style={{ color: TEXT_MUTED }}>
+            <div className="text-[11px] text-right text-gray-400 dark:text-gray-500">
               Atualizando…
             </div>
           )}
@@ -528,14 +522,7 @@ function FilterSelect({ label, value, onChange, options }) {
   return (
     <div>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger
-          className="w-full h-9 text-xs border"
-          style={{
-            backgroundColor: PANEL_BG,
-            borderColor: PANEL_BORDER,
-            color: TEXT_BRIGHT,
-          }}
-        >
+        <SelectTrigger className="w-full h-9 text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
           <SelectValue placeholder={label} />
         </SelectTrigger>
         <SelectContent>
@@ -546,7 +533,7 @@ function FilterSelect({ label, value, onChange, options }) {
           ))}
         </SelectContent>
       </Select>
-      <div className="text-[10px] mt-1 tracking-widest" style={{ color: TEXT_MUTED }}>
+      <div className="text-[10px] mt-1 tracking-widest text-gray-500 dark:text-gray-400">
         {label}
       </div>
     </div>
