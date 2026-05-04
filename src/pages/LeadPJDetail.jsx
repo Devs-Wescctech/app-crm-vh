@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,6 +53,7 @@ import {
   Image as ImageIcon,
   Shield,
   History,
+  ChevronsUpDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -2207,35 +2209,73 @@ export default function LeadPJDetail() {
                 <div>
                   <Label className="text-gray-900 dark:text-gray-100">Interesse</Label>
                   {(() => {
-                    // Task #67 — preserva valor legado: se o lead já tem um
-                    // "interesse" salvo que não está mais nas opções
-                    // configuradas (admin removeu a opção depois), incluímos
-                    // o valor atual no dropdown rotulado como "(valor existente)"
-                    // para que o admin não perca o dado ao salvar.
-                    const currentValue = editedLead.interest !== undefined
+                    const rawValue = editedLead.interest !== undefined
                       ? editedLead.interest
                       : (lead.interest || "");
-                    const renderedOptions = currentValue && !INTEREST_OPTIONS.includes(currentValue)
-                      ? [currentValue, ...INTEREST_OPTIONS]
-                      : INTEREST_OPTIONS;
-                    const isLegacy = currentValue && !INTEREST_OPTIONS.includes(currentValue);
+                    const selectedItems = Array.isArray(rawValue)
+                      ? rawValue
+                      : (typeof rawValue === 'string' && rawValue.trim()
+                          ? rawValue.split(',').map((s) => s.trim()).filter(Boolean)
+                          : []);
+                    const legacyItems = selectedItems.filter(
+                      (v) => !INTEREST_OPTIONS.includes(v)
+                    );
+                    const allOptions = [...legacyItems, ...INTEREST_OPTIONS];
+                    const toggleItem = (option, checked) => {
+                      const next = checked
+                        ? [...selectedItems, option]
+                        : selectedItems.filter((v) => v !== option);
+                      handleFieldChange('interest', next.join(', '));
+                    };
                     return (
-                      <Select
-                        value={currentValue}
-                        onValueChange={(val) => handleFieldChange('interest', val)}
-                      >
-                        <SelectTrigger className="mt-1 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-                          <SelectValue placeholder="Selecione o interesse" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {renderedOptions.map(option => (
-                            <SelectItem key={option} value={option}>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            className="mt-1 w-full justify-between font-normal h-auto min-h-[36px] py-1.5 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                          >
+                            <span className="flex flex-wrap gap-1 flex-1 text-left">
+                              {selectedItems.length === 0 ? (
+                                <span className="text-muted-foreground">Selecione o interesse</span>
+                              ) : (
+                                selectedItems.map((item) => (
+                                  <span
+                                    key={item}
+                                    className="inline-flex items-center gap-0.5 bg-primary/10 text-primary text-xs rounded px-1.5 py-0.5"
+                                  >
+                                    {item}
+                                    {legacyItems.includes(item) ? ' (existente)' : ''}
+                                    <X
+                                      className="w-3 h-3 cursor-pointer hover:text-red-500"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleItem(item, false);
+                                      }}
+                                    />
+                                  </span>
+                                ))
+                              )}
+                            </span>
+                            <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[260px] p-2 max-h-[240px] overflow-y-auto" align="start">
+                          {allOptions.map((option) => (
+                            <label
+                              key={option}
+                              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm"
+                            >
+                              <Checkbox
+                                checked={selectedItems.includes(option)}
+                                onCheckedChange={(checked) => toggleItem(option, checked)}
+                              />
                               {option}
-                              {isLegacy && option === currentValue ? ' (valor existente)' : ''}
-                            </SelectItem>
+                              {legacyItems.includes(option) ? ' (existente)' : ''}
+                            </label>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </PopoverContent>
+                      </Popover>
                     );
                   })()}
                 </div>

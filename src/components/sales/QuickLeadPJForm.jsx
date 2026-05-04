@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Search, Building2, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, Search, Building2, CheckCircle, AlertCircle, ChevronsUpDown, X } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const DEFAULT_INTEREST_OPTIONS_PJ = [
   "Consultoria",
@@ -97,7 +99,7 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
     cep: "",
     city: "",
     state: "",
-    interest: "",
+    interest: [],
     numEmployees: "",
     monthlyRevenue: "",
     value: "",
@@ -233,6 +235,7 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
       ...formData,
       agentId: currentAgentId || null,
       stage: 'novo',
+      interest: Array.isArray(formData.interest) ? formData.interest.join(', ') : (formData.interest || ''),
       numEmployees: formData.numEmployees ? parseInt(formData.numEmployees) : null,
       monthlyRevenue: formData.monthlyRevenue ? parseFloat(formData.monthlyRevenue) : null,
       monthlyValue: formData.monthlyValue ? parseFloat(formData.monthlyValue) : null,
@@ -502,16 +505,62 @@ export default function QuickLeadPJForm({ onSuccess, onCancel }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label>Interesse</Label>
-            <Select value={formData.interest} onValueChange={(val) => setFormData({...formData, interest: val})}>
-              <SelectTrigger className="mt-1">
-                <SelectValue placeholder="Selecione" />
-              </SelectTrigger>
-              <SelectContent>
-                {INTEREST_OPTIONS.map(option => (
-                  <SelectItem key={option} value={option}>{option}</SelectItem>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  className="mt-1 w-full justify-between font-normal h-auto min-h-[36px] py-1.5"
+                >
+                  <span className="flex flex-wrap gap-1 flex-1 text-left">
+                    {formData.interest.length === 0 ? (
+                      <span className="text-muted-foreground">Selecione</span>
+                    ) : (
+                      formData.interest.map((item) => (
+                        <span
+                          key={item}
+                          className="inline-flex items-center gap-0.5 bg-primary/10 text-primary text-xs rounded px-1.5 py-0.5"
+                        >
+                          {item}
+                          <X
+                            className="w-3 h-3 cursor-pointer hover:text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFormData({
+                                ...formData,
+                                interest: formData.interest.filter((v) => v !== item),
+                              });
+                            }}
+                          />
+                        </span>
+                      ))
+                    )}
+                  </span>
+                  <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[260px] p-2 max-h-[240px] overflow-y-auto" align="start">
+                {INTEREST_OPTIONS.map((option) => (
+                  <label
+                    key={option}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent cursor-pointer text-sm"
+                  >
+                    <Checkbox
+                      checked={formData.interest.includes(option)}
+                      onCheckedChange={(checked) => {
+                        setFormData({
+                          ...formData,
+                          interest: checked
+                            ? [...formData.interest, option]
+                            : formData.interest.filter((v) => v !== option),
+                        });
+                      }}
+                    />
+                    {option}
+                  </label>
                 ))}
-              </SelectContent>
-            </Select>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div>

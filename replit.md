@@ -94,6 +94,7 @@ A pre-commit hook enforces the rule above:
 - **Kanban Boards**: Advanced drag-and-drop implementation using `@dnd-kit` with sticky headers, auto-scroll, and mobile responsiveness.
 - **Component Library**: Radix UI for accessibility, styled with Tailwind CSS.
 - **Data Visualization**: Recharts for dynamic dashboards.
+- **Interest Multi-Select**: Lead interest field uses Popover+Checkbox multi-select (not single Select). Stored as comma-separated TEXT in DB. Settings strips commas from option names to prevent delimiter conflicts.
 - **Visual Design System**: Indigo/violet gradient theme for B2B sales, glassmorphism sidebar, temperature badges.
 - **Mobile Responsiveness**: Full support with hamburger menu, collapsible sidebar, touch-friendly Kanban, and responsive grids.
 

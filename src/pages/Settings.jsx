@@ -234,7 +234,7 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
     list.some((opt) => String(opt).trim().toLocaleLowerCase('pt-BR') === candidate.toLocaleLowerCase('pt-BR'));
 
   const handleAdd = () => {
-    const trimmed = newOption.trim();
+    const trimmed = newOption.replace(/,/g, '').trim();
     if (!trimmed) return;
     if (isDuplicate(options, trimmed)) {
       toast.error('Esta opção já existe');
@@ -257,7 +257,7 @@ function OptionListEditor({ title, description, settingKey, settings, onSave }) 
 
   const handleSave = async () => {
     let toSave = options;
-    const pending = newOption.trim();
+    const pending = newOption.replace(/,/g, '').trim();
     if (pending) {
       if (isDuplicate(options, pending)) {
         toast.error('Esta opção já existe');
