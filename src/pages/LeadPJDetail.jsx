@@ -352,14 +352,8 @@ export default function LeadPJDetail() {
 
   // Task #63 — quando o vendedor escolhe um produto do catálogo, snapshot do
   // nome vai pro `descricao` (preserva o nome se o produto for desativado) e
-  // o `valor_unitario` é pré-preenchido com o `default_value`. "__custom__"
-  // libera a edição manual em texto livre (sem product_id).
-  const FREE_TEXT_OPTION = '__custom__';
+  // o `valor_unitario` é pré-preenchido com o `default_value`.
   const handleSelectProductForNew = (value) => {
-    if (value === FREE_TEXT_OPTION) {
-      setNewItem({ ...newItem, productId: '', descricao: '' });
-      return;
-    }
     const product = sortedActiveProducts.find((p) => p.id === value);
     if (!product) return;
     const defaultValue = product.defaultValue ?? product.default_value ?? 0;
@@ -372,10 +366,6 @@ export default function LeadPJDetail() {
   };
 
   const handleSelectProductForEditing = (value) => {
-    if (value === FREE_TEXT_OPTION) {
-      setEditingItemDraft({ ...editingItemDraft, productId: '', descricao: '' });
-      return;
-    }
     const product = sortedActiveProducts.find((p) => p.id === value);
     if (!product) return;
     const defaultValue = product.defaultValue ?? product.default_value ?? 0;
@@ -2410,7 +2400,7 @@ export default function LeadPJDetail() {
                               <div>
                                 <Label className="text-xs text-gray-600 dark:text-gray-300">Produto</Label>
                                 <Select
-                                  value={editingItemDraft.productId || (editingItemDraft.descricao ? FREE_TEXT_OPTION : '')}
+                                  value={editingItemDraft.productId || ''}
                                   onValueChange={handleSelectProductForEditing}
                                 >
                                   <SelectTrigger className="mt-1 bg-white dark:bg-gray-800">
@@ -2427,19 +2417,8 @@ export default function LeadPJDetail() {
                                         {p.name}
                                       </SelectItem>
                                     ))}
-                                    <SelectItem value={FREE_TEXT_OPTION}>
-                                      Outro (descrição livre)
-                                    </SelectItem>
                                   </SelectContent>
                                 </Select>
-                                {(!editingItemDraft.productId) && (
-                                  <Input
-                                    value={editingItemDraft.descricao}
-                                    onChange={(e) => setEditingItemDraft({ ...editingItemDraft, descricao: e.target.value })}
-                                    placeholder="Descrição do item"
-                                    className="mt-2"
-                                  />
-                                )}
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <div>
@@ -2558,7 +2537,7 @@ export default function LeadPJDetail() {
                   <p className="text-xs font-semibold text-green-800 dark:text-green-300">Adicionar item</p>
                   <div>
                     <Select
-                      value={newItem.productId || (newItem.descricao ? FREE_TEXT_OPTION : '')}
+                      value={newItem.productId || ''}
                       onValueChange={handleSelectProductForNew}
                     >
                       <SelectTrigger className="bg-white dark:bg-gray-800">
@@ -2579,19 +2558,8 @@ export default function LeadPJDetail() {
                             {p.name}
                           </SelectItem>
                         ))}
-                        <SelectItem value={FREE_TEXT_OPTION}>
-                          Outro (descrição livre)
-                        </SelectItem>
                       </SelectContent>
                     </Select>
-                    {!newItem.productId && (
-                      <Input
-                        value={newItem.descricao}
-                        onChange={(e) => setNewItem({ ...newItem, descricao: e.target.value })}
-                        placeholder="Descrição do produto/serviço"
-                        className="bg-white dark:bg-gray-800 mt-2"
-                      />
-                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>

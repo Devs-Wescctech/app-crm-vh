@@ -772,6 +772,10 @@ ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS contact2_phone VARCHAR(50);
 -- reescritos por outros updates após o lead já ter sido ganho.
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS concluded_at TIMESTAMP;
 
+-- Task: garantir que a coluna price_fixed exista na tabela products
+-- (criada após a tabela já existir em ambientes de produção).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS price_fixed BOOLEAN NOT NULL DEFAULT false;
+
 -- Temperatura manual do lead (Quente/Morno/Frio). A partir da Task #62 a
 -- temperatura passou a ser definida 100% pelo vendedor; não há mais cálculo
 -- automático nem cron que reavalie. NULL = "sem temperatura definida".
