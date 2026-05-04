@@ -2455,14 +2455,28 @@ export default function LeadPJDetail() {
                                 </div>
                                 <div>
                                   <Label className="text-xs text-gray-600 dark:text-gray-300">Valor Unitário (R$)</Label>
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={editingItemDraft.valorUnitario}
-                                    onChange={(e) => setEditingItemDraft({ ...editingItemDraft, valorUnitario: e.target.value })}
-                                    className="mt-1"
-                                  />
+                                  {(() => {
+                                    const selProduct = editingItemDraft.productId
+                                      ? sortedActiveProducts.find((p) => p.id === editingItemDraft.productId)
+                                      : null;
+                                    const isFixed = !!(selProduct?.priceFixed ?? selProduct?.price_fixed);
+                                    return (
+                                      <>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={editingItemDraft.valorUnitario}
+                                          onChange={(e) => setEditingItemDraft({ ...editingItemDraft, valorUnitario: e.target.value })}
+                                          className="mt-1"
+                                          disabled={isFixed}
+                                        />
+                                        {isFixed && (
+                                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Preço fixo definido pelo admin</p>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                               <div className="flex items-center justify-end gap-2 pt-1">
@@ -2593,15 +2607,29 @@ export default function LeadPJDetail() {
                     </div>
                     <div>
                       <Label className="text-xs text-gray-600 dark:text-gray-300">Valor Unitário (R$)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={newItem.valorUnitario}
-                        onChange={(e) => setNewItem({ ...newItem, valorUnitario: e.target.value })}
-                        placeholder="0.00"
-                        className="mt-1 bg-white dark:bg-gray-800"
-                      />
+                      {(() => {
+                        const selProduct = newItem.productId
+                          ? sortedActiveProducts.find((p) => p.id === newItem.productId)
+                          : null;
+                        const isFixed = !!(selProduct?.priceFixed ?? selProduct?.price_fixed);
+                        return (
+                          <>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={newItem.valorUnitario}
+                              onChange={(e) => setNewItem({ ...newItem, valorUnitario: e.target.value })}
+                              placeholder="0.00"
+                              className="mt-1 bg-white dark:bg-gray-800"
+                              disabled={isFixed}
+                            />
+                            {isFixed && (
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Preço fixo definido pelo admin</p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                   <Button

@@ -95,6 +95,8 @@ A pre-commit hook enforces the rule above:
 - **Component Library**: Radix UI for accessibility, styled with Tailwind CSS.
 - **Data Visualization**: Recharts for dynamic dashboards.
 - **Interest Multi-Select**: Lead interest field uses Popover+Checkbox multi-select (not single Select). Stored as comma-separated TEXT in DB. Settings strips commas from option names to prevent delimiter conflicts.
+- **Product Pricing**: Products have `price_fixed` boolean. When true, sellers cannot change the unit price in proposals (field is disabled with "Preço fixo" label). Settings shows "Fixo"/"Variável" badge per product.
+- **Data Visibility**: All report pages (SalesPJWonReport, SalesPJLostReport, LeadPJReportList) enforce agent visibility rules — sellers only see their own leads, supervisors see their team, admins see everything.
 - **Visual Design System**: Indigo/violet gradient theme for B2B sales, glassmorphism sidebar, temperature badges.
 - **Mobile Responsiveness**: Full support with hamburger menu, collapsible sidebar, touch-friendly Kanban, and responsive grids.
 

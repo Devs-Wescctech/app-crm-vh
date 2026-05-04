@@ -866,6 +866,7 @@ CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     default_value NUMERIC(15,2) NOT NULL DEFAULT 0 CHECK (default_value >= 0),
+    price_fixed BOOLEAN NOT NULL DEFAULT false,
     description TEXT,
     active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),

@@ -73,7 +73,11 @@ export default function SalesPJWonReport() {
     queryKey: ['leads-pj-won-report', getDataVisibilityKey(user, currentAgent), allAgents.length, teams.length],
     queryFn: async () => {
       const allLeads = await base44.entities.LeadPJ.list('-createdDate', 10000);
-      return allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
+      const wonLeads = allLeads.filter(l => l.concluded || l.stage === 'fechado_ganho');
+      if (isAdmin) return wonLeads;
+      if (!currentAgent) return [];
+      const visIds = getVisibleAgentIds(currentAgent, allAgents, teams);
+      return wonLeads.filter(l => visIds.includes(l.agentId || l.agent_id));
     },
     enabled: !!user && hasPermission && allAgents.length > 0,
   });

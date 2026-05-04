@@ -1211,11 +1211,11 @@ function ProductsManager() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
-  const [form, setForm] = useState({ name: '', defaultValue: '', description: '', active: true });
+  const [form, setForm] = useState({ name: '', defaultValue: '', priceFixed: false, description: '', active: true });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const resetForm = () => {
-    setForm({ name: '', defaultValue: '', description: '', active: true });
+    setForm({ name: '', defaultValue: '', priceFixed: false, description: '', active: true });
     setEditingProduct(null);
   };
 
@@ -1229,6 +1229,7 @@ function ProductsManager() {
     setForm({
       name: product.name || '',
       defaultValue: String(product.defaultValue ?? product.default_value ?? ''),
+      priceFixed: !!(product.priceFixed ?? product.price_fixed),
       description: product.description || '',
       active: product.active !== false,
     });
@@ -1251,6 +1252,7 @@ function ProductsManager() {
       const payload = {
         name,
         default_value: defaultValue,
+        price_fixed: !!form.priceFixed,
         description: (form.description || '').trim() || null,
         active: !!form.active,
       };
@@ -1328,6 +1330,7 @@ function ProductsManager() {
                 <tr className="border-b border-gray-200 dark:border-gray-800 text-left text-gray-500 dark:text-gray-400">
                   <th className="py-2 px-3 font-medium">Nome</th>
                   <th className="py-2 px-3 font-medium">Valor padrão</th>
+                  <th className="py-2 px-3 font-medium">Preço</th>
                   <th className="py-2 px-3 font-medium">Descrição</th>
                   <th className="py-2 px-3 font-medium">Status</th>
                   <th className="py-2 px-3 font-medium text-right">Ações</th>
@@ -1340,6 +1343,13 @@ function ProductsManager() {
                     <tr key={p.id} className="border-b border-gray-100 dark:border-gray-800/60 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                       <td className="py-2 px-3 font-medium text-gray-900 dark:text-gray-100">{p.name}</td>
                       <td className="py-2 px-3 text-gray-700 dark:text-gray-300">{formatBRL(p.defaultValue ?? p.default_value)}</td>
+                      <td className="py-2 px-3">
+                        <Badge className={(p.priceFixed ?? p.price_fixed)
+                          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100'
+                          : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'}>
+                          {(p.priceFixed ?? p.price_fixed) ? 'Fixo' : 'Variável'}
+                        </Badge>
+                      </td>
                       <td className="py-2 px-3 text-gray-500 dark:text-gray-400 max-w-xs truncate">{p.description || '—'}</td>
                       <td className="py-2 px-3">
                         <Badge className={active
@@ -1447,9 +1457,20 @@ function ProductDialog({ open, onClose, form, setForm, onSave, saving, editing }
               className="mt-1"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Sugestão pré-preenchida no momento da proposta. O vendedor pode ajustar.
+              {form.priceFixed
+                ? 'Valor fixo — o vendedor não poderá alterar na proposta.'
+                : 'Sugestão pré-preenchida no momento da proposta. O vendedor pode ajustar.'}
             </p>
           </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!form.priceFixed}
+              onChange={(e) => setForm({ ...form, priceFixed: e.target.checked })}
+              className="rounded border-gray-300"
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Preço fixo (vendedor não pode alterar o valor)</span>
+          </label>
           <div>
             <Label className="text-sm">Descrição (opcional)</Label>
             <textarea
