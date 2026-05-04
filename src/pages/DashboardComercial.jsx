@@ -465,11 +465,15 @@ export default function DashboardComercial() {
               <ProductBars data={data?.produto} />
             </Panel>
 
-            <Panel title="Origem" className="col-span-12 md:col-span-6 lg:col-span-3">
+            <Panel title="Origem" className="col-span-12 md:col-span-6 lg:col-span-2">
               <ListPaged items={data?.origem || []} pageSize={6} showPct />
             </Panel>
 
-            <Panel title="Lead/Mês" className="col-span-12 md:col-span-6 lg:col-span-4">
+            <Panel title="Interesse" className="col-span-12 md:col-span-6 lg:col-span-2">
+              <ListPaged items={data?.interesse || []} pageSize={6} showPct />
+            </Panel>
+
+            <Panel title="Lead/Mês" className="col-span-12 md:col-span-6 lg:col-span-3">
               <MonthLine data={data?.leadPorMes} />
             </Panel>
           </div>

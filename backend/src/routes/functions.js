@@ -5162,6 +5162,22 @@ router.get(
         value: row.qty,
       }));
 
+      // 11) Interesse — split comma-separated interest into individual values
+      const interesseRes = await query(
+        `SELECT TRIM(unnest(string_to_array(COALESCE(NULLIF(TRIM(l.interest), ''), 'Não informado'), ','))) AS label,
+                COUNT(*)::int AS qty
+         FROM leads_pj l ${where}
+         GROUP BY label
+         ORDER BY qty DESC
+         LIMIT 20`,
+        params
+      );
+      const interesseArr = interesseRes.rows.map((row) => ({
+        label: row.label,
+        value: row.qty,
+        pct: totalLeads ? +((row.qty / totalLeads) * 100).toFixed(2) : 0,
+      }));
+
       // Available products for the filter dropdown
       const productsRes = await query(
         `SELECT id, name FROM products WHERE active = true ORDER BY name ASC`
@@ -5174,6 +5190,7 @@ router.get(
         etapa: etapaArr,
         produto: produtoArr,
         origem: origemArr,
+        interesse: interesseArr,
         leadEmpresa: leadEmpresaArr,
         leadNome: leadNomeArr,
         cargoDeclarado: cargoArr,
