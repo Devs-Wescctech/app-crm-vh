@@ -1,16 +1,20 @@
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isWithinInterval, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, Filter, Search, X, Users, Building2, User as UserIcon, Clock, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { CalendarIcon, Filter, Search, X, Users, Building2, User as UserIcon, Clock, ChevronLeft, ChevronRight, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -418,6 +422,68 @@ export default function AgendasPanel() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selectedActivity, setSelectedActivity] = useState(null);
+  const [editingActivity, setEditingActivity] = useState(null);
+  const [editDraft, setEditDraft] = useState({ title: "", description: "", scheduledAt: "" });
+  const [confirmDeleteActivity, setConfirmDeleteActivity] = useState(null);
+  const queryClient = useQueryClient();
+
+  const invalidateAgendas = () => {
+    queryClient.invalidateQueries({ queryKey: ["activitiesPJ"] });
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    refetch();
+  };
+
+  const updateActivityMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.ActivityPJ.update(id, data),
+    onSuccess: () => {
+      invalidateAgendas();
+      setEditingActivity(null);
+      toast.success("Agendamento atualizado!");
+    },
+    onError: (err) => toast.error(err?.message || "Erro ao atualizar agendamento"),
+  });
+
+  const deleteActivityMutation = useMutation({
+    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+    onSuccess: () => {
+      invalidateAgendas();
+      setConfirmDeleteActivity(null);
+      toast.success("Agendamento removido!");
+    },
+    onError: (err) => toast.error(err?.message || "Erro ao remover agendamento"),
+  });
+
+  useEffect(() => {
+    if (!editingActivity) return;
+    const sched = getVal(editingActivity, "scheduledAt", "scheduled_at");
+    let local = "";
+    if (sched) {
+      const d = new Date(sched);
+      if (isValid(d)) {
+        const pad = (n) => String(n).padStart(2, "0");
+        local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+    }
+    setEditDraft({
+      title: getVal(editingActivity, "title") || "",
+      description: getVal(editingActivity, "description") || "",
+      scheduledAt: local,
+    });
+  }, [editingActivity]);
+
+  const handleSaveEdit = () => {
+    if (!editingActivity || !editDraft.title.trim()) return;
+    updateActivityMutation.mutate({
+      id: editingActivity.id,
+      data: {
+        title: editDraft.title,
+        description: editDraft.description || "",
+        scheduled_at: editDraft.scheduledAt
+          ? new Date(editDraft.scheduledAt).toISOString()
+          : null,
+      },
+    });
+  };
 
   const dateRange = useMemo(() => resolveDateRange(periodPreset, customRange), [periodPreset, customRange]);
 
@@ -581,20 +647,21 @@ export default function AgendasPanel() {
                 {isCoordinatorOrAdmin && <TableHead>Supervisor</TableHead>}
                 <TableHead>Cliente</TableHead>
                 <TableHead className="w-[120px]">Status</TableHead>
+                <TableHead className="w-[110px] text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loadingActivities ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={isCoordinatorOrAdmin ? 6 : 5}>
+                    <TableCell colSpan={isCoordinatorOrAdmin ? 7 : 6}>
                       <Skeleton className="h-10 w-full" />
                     </TableCell>
                   </TableRow>
                 ))
               ) : pageItems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isCoordinatorOrAdmin ? 6 : 5}>
+                  <TableCell colSpan={isCoordinatorOrAdmin ? 7 : 6}>
                     <div className="py-12 text-center">
                       <CalendarIcon className="w-10 h-10 mx-auto text-gray-300 dark:text-gray-700 mb-3" />
                       <div className="text-sm text-gray-600 dark:text-gray-400 font-medium">
@@ -661,6 +728,32 @@ export default function AgendasPanel() {
                       <TableCell>
                         <StatusBadge activity={act} />
                       </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => { e.stopPropagation(); setEditingActivity(act); }}
+                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                            title="Editar"
+                            aria-label="Editar agendamento"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span className="sr-only">Editar agendamento</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteActivity(act); }}
+                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
+                            title="Remover"
+                            aria-label="Remover agendamento"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="sr-only">Remover agendamento</span>
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })
@@ -716,6 +809,81 @@ export default function AgendasPanel() {
         })()}
         onClose={() => setSelectedActivity(null)}
       />
+
+      <Dialog open={!!editingActivity} onOpenChange={(o) => { if (!o) setEditingActivity(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar agendamento</DialogTitle>
+            <DialogDescription>Atualize o título, descrição ou data/hora deste agendamento.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label>Título</Label>
+              <Input
+                value={editDraft.title}
+                onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                placeholder="Título do agendamento"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Descrição</Label>
+              <Textarea
+                value={editDraft.description}
+                onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                placeholder="Detalhes adicionais"
+                rows={3}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Data e Hora</Label>
+              <Input
+                type="datetime-local"
+                value={editDraft.scheduledAt}
+                onChange={(e) => setEditDraft({ ...editDraft, scheduledAt: e.target.value })}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingActivity(null)}>Cancelar</Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={updateActivityMutation.isPending || !editDraft.title.trim()}
+              className="bg-[#5A2A3C] hover:bg-[#4a2231] text-white"
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!confirmDeleteActivity} onOpenChange={(o) => { if (!o) setConfirmDeleteActivity(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover agendamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. O agendamento será permanentemente removido.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteActivityMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmDeleteActivity && !deleteActivityMutation.isPending) {
+                  deleteActivityMutation.mutate(confirmDeleteActivity.id);
+                }
+              }}
+              disabled={deleteActivityMutation.isPending}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleteActivityMutation.isPending ? "Removendo..." : "Remover"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
