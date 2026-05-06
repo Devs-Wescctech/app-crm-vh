@@ -149,6 +149,8 @@ export default function LeadPJDetail() {
   const [previewFile, setPreviewFile] = useState(null);
   const [reassignAgentId, setReassignAgentId] = useState("");
   const [transferPendingActivities, setTransferPendingActivities] = useState(true);
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editingTaskDraft, setEditingTaskDraft] = useState({ title: "", description: "", scheduledAt: "" });
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
@@ -821,9 +823,78 @@ export default function LeadPJDetail() {
       type: newTask.type || 'task',
       title: newTask.title,
       description: newTask.description || "",
-      scheduled_at: newTask.scheduledAt,
+      scheduled_at: newTask.scheduledAt ? new Date(newTask.scheduledAt).toISOString() : null,
       assigned_to: leadAgentId,
       completed: false,
+    });
+  };
+
+  const updateTaskMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.ActivityPJ.update(id, data),
+    onSuccess: () => {
+      invalidateActivityCaches();
+      setEditingTaskId(null);
+      setEditingTaskDraft({ title: "", description: "", scheduledAt: "" });
+      toast.success('Atividade atualizada!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao atualizar atividade'),
+  });
+
+  const deleteTaskMutation = useMutation({
+    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+    onSuccess: () => {
+      invalidateActivityCaches();
+      toast.success('Atividade removida!');
+    },
+    onError: (err) => toast.error(err?.message || 'Erro ao remover atividade'),
+  });
+
+  const startEditingTask = (task) => {
+    const sched = task.scheduledAt || task.scheduled_at;
+    let local = "";
+    if (sched) {
+      const d = new Date(sched);
+      const pad = (n) => String(n).padStart(2, '0');
+      local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    setEditingTaskId(task.id);
+    setEditingTaskDraft({
+      title: task.title || "",
+      description: task.description || "",
+      scheduledAt: local,
+    });
+  };
+
+  const cancelEditingTask = () => {
+    setEditingTaskId(null);
+    setEditingTaskDraft({ title: "", description: "", scheduledAt: "" });
+  };
+
+  const handleSaveEditingTask = () => {
+    if (!editingTaskDraft.title.trim()) return;
+    updateTaskMutation.mutate({
+      id: editingTaskId,
+      data: {
+        title: editingTaskDraft.title,
+        description: editingTaskDraft.description || "",
+        scheduled_at: editingTaskDraft.scheduledAt
+          ? new Date(editingTaskDraft.scheduledAt).toISOString()
+          : null,
+      },
+    });
+  };
+
+  const handleDeleteTask = (task) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Remover atividade?',
+      message: 'Esta ação não pode ser desfeita. Deseja realmente remover esta atividade/agendamento?',
+      confirmLabel: 'Remover',
+      variant: 'danger',
+      onConfirm: () => {
+        deleteTaskMutation.mutate(task.id);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      },
     });
   };
 
@@ -1533,8 +1604,40 @@ export default function LeadPJDetail() {
                         {pendingTasks.map((task) => {
                           const typeConfig = getTaskTypeConfig(task.type);
                           const TypeIcon = typeConfig.icon;
+                          const isEditingThis = editingTaskId === task.id;
                           return (
                           <div key={task.id} className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all">
+                            {isEditingThis ? (
+                              <div className="space-y-2">
+                                <Input
+                                  value={editingTaskDraft.title}
+                                  onChange={(e) => setEditingTaskDraft({ ...editingTaskDraft, title: e.target.value })}
+                                  placeholder="Título da atividade"
+                                />
+                                <Textarea
+                                  value={editingTaskDraft.description}
+                                  onChange={(e) => setEditingTaskDraft({ ...editingTaskDraft, description: e.target.value })}
+                                  placeholder="Descrição"
+                                  rows={2}
+                                />
+                                <Input
+                                  type="datetime-local"
+                                  value={editingTaskDraft.scheduledAt}
+                                  onChange={(e) => setEditingTaskDraft({ ...editingTaskDraft, scheduledAt: e.target.value })}
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" variant="outline" onClick={cancelEditingTask}>Cancelar</Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={handleSaveEditingTask}
+                                    disabled={updateTaskMutation.isPending || !editingTaskDraft.title.trim()}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                                  >
+                                    Salvar
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
                             <div className="flex items-start gap-3">
                               <div className={`mt-0.5 p-1.5 rounded-lg ${typeConfig.bg}`}>
                                 <TypeIcon className={`w-4 h-4 ${typeConfig.color}`} />
@@ -1558,17 +1661,39 @@ export default function LeadPJDetail() {
                                   </p>
                                 )}
                               </div>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => completeTaskMutation.mutate(task.id)}
-                                disabled={completeTaskMutation.isPending}
-                                className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30"
-                              >
-                                <CheckCircle className="w-4 h-4 mr-1" />
-                                Concluir
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => completeTaskMutation.mutate(task.id)}
+                                  disabled={completeTaskMutation.isPending}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30"
+                                  title="Concluir"
+                                >
+                                  <CheckCircle className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startEditingTask(task)}
+                                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 h-8 w-8 p-0"
+                                  title="Editar"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteTask(task)}
+                                  disabled={deleteTaskMutation.isPending}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 h-8 w-8 p-0"
+                                  title="Remover"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
                             </div>
+                            )}
                           </div>
                           );
                         })}
