@@ -29,6 +29,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   Calendar as CalendarIcon,
   Clock,
   MapPin,
@@ -53,6 +61,9 @@ import {
   X,
   Flag,
   ArrowRight,
+  Search,
+  Building2,
+  Check,
 } from "lucide-react";
 import { getAgentDisplayName } from "@/utils/agents";
 import {
@@ -117,7 +128,9 @@ export default function SalesAgenda() {
     type: 'task',
     priority: 'media',
     scheduledAt: '',
+    leadId: '',
   });
+  const [leadPickerOpen, setLeadPickerOpen] = useState(false);
 
   const { data: user } = useQuery({
     queryKey: ["currentUser"],
@@ -235,7 +248,7 @@ export default function SalesAgenda() {
       queryClient.invalidateQueries({ queryKey: ["activitiesPJ"] });
       toast.success("Atividade criada com sucesso!");
       setShowCreateSheet(false);
-      setNewTaskForm({ title: '', description: '', type: 'task', priority: 'media', scheduledAt: '' });
+      setNewTaskForm({ title: '', description: '', type: 'task', priority: 'media', scheduledAt: '', leadId: '' });
     },
     onError: (error) => {
       toast.error("Erro ao criar atividade: " + error.message);
@@ -243,16 +256,24 @@ export default function SalesAgenda() {
   });
 
   const handleCreateTask = () => {
+    if (!newTaskForm.leadId) {
+      toast.error("Selecione o lead vinculado a esta atividade");
+      return;
+    }
     if (!newTaskForm.title.trim()) {
       toast.error("Digite o título da atividade");
       return;
     }
+    const selectedLead = leadsPJ.find((l) => String(l.id) === String(newTaskForm.leadId));
+    const leadAgentId = selectedLead?.agentId || selectedLead?.agent_id || null;
     createActivityMutation.mutate({
+      lead_id: newTaskForm.leadId,
       type: newTaskForm.type,
       title: newTaskForm.title,
       description: newTaskForm.description || null,
       priority: newTaskForm.priority,
-      scheduledAt: newTaskForm.scheduledAt ? new Date(newTaskForm.scheduledAt).toISOString() : null,
+      scheduled_at: newTaskForm.scheduledAt ? new Date(newTaskForm.scheduledAt).toISOString() : null,
+      assigned_to: leadAgentId,
       completed: false,
     });
   };
@@ -261,8 +282,14 @@ export default function SalesAgenda() {
     setNewTaskForm(prev => ({
       ...prev,
       scheduledAt: format(date, "yyyy-MM-dd'T'HH:mm"),
+      leadId: prev.leadId || '',
     }));
     setShowCreateSheet(true);
+  };
+
+  const getLeadDisplayName = (lead) => {
+    if (!lead) return '';
+    return lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || `Lead #${lead.id}`;
   };
 
   const currentAgent = user?.agent || agents.find((a) => a.userEmail === user?.email || a.email === user?.email);
@@ -589,6 +616,75 @@ export default function SalesAgenda() {
             <SheetDescription>Crie uma nova tarefa ou atividade na agenda</SheetDescription>
           </SheetHeader>
           <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-gray-500" /> Lead vinculado *
+              </Label>
+              <Popover open={leadPickerOpen} onOpenChange={setLeadPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={leadPickerOpen}
+                    className="w-full justify-between font-normal"
+                  >
+                    {newTaskForm.leadId ? (
+                      <span className="truncate">
+                        {getLeadDisplayName(leadsPJ.find((l) => String(l.id) === String(newTaskForm.leadId)))}
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">Pesquise e selecione um lead...</span>
+                    )}
+                    <Search className="ml-2 h-3.5 w-3.5 shrink-0 opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command
+                    filter={(value, search) => {
+                      if (!search) return 1;
+                      return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+                    }}
+                  >
+                    <CommandInput placeholder="Buscar por nome, CNPJ ou contato..." />
+                    <CommandList>
+                      <CommandEmpty>Nenhum lead encontrado.</CommandEmpty>
+                      <CommandGroup>
+                        {leadsPJ.map((lead) => {
+                          const display = getLeadDisplayName(lead);
+                          const cnpj = lead.cnpj || '';
+                          const contact = lead.contactName || lead.contact_name || '';
+                          const searchValue = `${display} ${cnpj} ${contact}`.trim();
+                          return (
+                            <CommandItem
+                              key={lead.id}
+                              value={searchValue}
+                              onSelect={() => {
+                                setNewTaskForm((prev) => ({ ...prev, leadId: String(lead.id) }));
+                                setLeadPickerOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={`mr-2 h-4 w-4 ${String(newTaskForm.leadId) === String(lead.id) ? 'opacity-100' : 'opacity-0'}`}
+                              />
+                              <div className="flex flex-col min-w-0">
+                                <span className="truncate text-sm">{display}</span>
+                                {(cnpj || contact) && (
+                                  <span className="truncate text-[11px] text-gray-500">
+                                    {[cnpj, contact].filter(Boolean).join(' · ')}
+                                  </span>
+                                )}
+                              </div>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <p className="text-[11px] text-gray-500">Toda atividade precisa estar vinculada a um lead.</p>
+            </div>
             <div className="space-y-2">
               <Label className="text-sm font-medium">Título *</Label>
               <Input
@@ -990,6 +1086,8 @@ function ActivityPopover({ activity, getLeadById, handleToggle, agents = [], onC
   const originalAgentName = reassigned
     ? getAgentDisplayName(getVal(activity, "originalAssignedTo", "original_assigned_to"), agents)
     : null;
+  const assignedRaw = getVal(activity, "assignedTo", "assigned_to") || getVal(activity, "createdBy", "created_by");
+  const vendedorName = assignedRaw ? getAgentDisplayName(assignedRaw, agents) : null;
 
   return (
     <motion.div
@@ -1042,10 +1140,16 @@ function ActivityPopover({ activity, getLeadById, handleToggle, agents = [], onC
                 className="flex items-center gap-2 hover:underline"
                 style={{ color: BRAND.burgundy }}
               >
-                <User className="w-4 h-4 flex-shrink-0" />
+                <Building2 className="w-4 h-4 flex-shrink-0" />
                 <span>{lead.nomeFantasia || lead.razaoSocial || lead.name || lead.contactName || 'Lead sem nome'}</span>
                 <ExternalLink className="w-3 h-3" />
               </Link>
+            )}
+            {vendedorName && (
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <User className="w-4 h-4 flex-shrink-0" />
+                <span><span className="text-gray-400">Vendedor:</span> {vendedorName}</span>
+              </div>
             )}
             {reassigned && (
               <div

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isWithinInterval, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, Filter, Search, X, Users, Building2, User as UserIcon, Clock, ChevronLeft, ChevronRight, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { CalendarIcon, Filter, Search, X, Users, Building2, User as UserIcon, Clock, ChevronLeft, ChevronRight, RefreshCw, Pencil, Ban } from "lucide-react";
 import { toast } from "sonner";
 
 import { base44 } from "@/api/base44Client";
@@ -443,14 +443,14 @@ export default function AgendasPanel() {
     onError: (err) => toast.error(err?.message || "Erro ao atualizar agendamento"),
   });
 
-  const deleteActivityMutation = useMutation({
-    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+  const cancelActivityMutation = useMutation({
+    mutationFn: (id) => base44.entities.ActivityPJ.update(id, { outcome: "cancelado" }),
     onSuccess: () => {
       invalidateAgendas();
       setConfirmDeleteActivity(null);
-      toast.success("Agendamento removido!");
+      toast.success("Agendamento cancelado! O histórico foi preservado.");
     },
-    onError: (err) => toast.error(err?.message || "Erro ao remover agendamento"),
+    onError: (err) => toast.error(err?.message || "Erro ao cancelar agendamento"),
   });
 
   useEffect(() => {
@@ -741,17 +741,19 @@ export default function AgendasPanel() {
                             <Pencil className="w-3.5 h-3.5" />
                             <span className="sr-only">Editar agendamento</span>
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteActivity(act); }}
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30"
-                            title="Remover"
-                            aria-label="Remover agendamento"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span className="sr-only">Remover agendamento</span>
-                          </Button>
+                          {getActivityStatus(act) !== "cancelado" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={(e) => { e.stopPropagation(); setConfirmDeleteActivity(act); }}
+                              className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/30"
+                              title="Cancelar agendamento"
+                              aria-label="Cancelar agendamento"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span className="sr-only">Cancelar agendamento</span>
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -862,24 +864,24 @@ export default function AgendasPanel() {
       <AlertDialog open={!!confirmDeleteActivity} onOpenChange={(o) => { if (!o) setConfirmDeleteActivity(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover agendamento?</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar este agendamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O agendamento será permanentemente removido.
+              O agendamento ficará marcado como <strong>Cancelado</strong> e continuará visível no histórico para consulta. Nenhuma informação será perdida.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteActivityMutation.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={cancelActivityMutation.isPending}>Voltar</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                if (confirmDeleteActivity && !deleteActivityMutation.isPending) {
-                  deleteActivityMutation.mutate(confirmDeleteActivity.id);
+                if (confirmDeleteActivity && !cancelActivityMutation.isPending) {
+                  cancelActivityMutation.mutate(confirmDeleteActivity.id);
                 }
               }}
-              disabled={deleteActivityMutation.isPending}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={cancelActivityMutation.isPending}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
             >
-              {deleteActivityMutation.isPending ? "Removendo..." : "Remover"}
+              {cancelActivityMutation.isPending ? "Cancelando..." : "Cancelar agendamento"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

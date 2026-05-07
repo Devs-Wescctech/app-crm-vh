@@ -46,6 +46,7 @@ import {
   Presentation,
   AlertCircle,
   Trash2,
+  Ban,
   Pencil,
   StickyNote,
   X,
@@ -841,12 +842,12 @@ export default function LeadPJDetail() {
   });
 
   const deleteTaskMutation = useMutation({
-    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+    mutationFn: (id) => base44.entities.ActivityPJ.update(id, { outcome: 'cancelado' }),
     onSuccess: () => {
       invalidateActivityCaches();
-      toast.success('Atividade removida!');
+      toast.success('Agendamento cancelado! O histórico foi preservado.');
     },
-    onError: (err) => toast.error(err?.message || 'Erro ao remover atividade'),
+    onError: (err) => toast.error(err?.message || 'Erro ao cancelar agendamento'),
   });
 
   const startEditingTask = (task) => {
@@ -887,9 +888,9 @@ export default function LeadPJDetail() {
   const handleDeleteTask = (task) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Remover atividade?',
-      message: 'Esta ação não pode ser desfeita. Deseja realmente remover esta atividade/agendamento?',
-      confirmLabel: 'Remover',
+      title: 'Cancelar agendamento?',
+      message: 'O agendamento ficará marcado como Cancelado e continuará visível no histórico para consulta. Nenhuma informação será perdida.',
+      confirmLabel: 'Cancelar agendamento',
       variant: 'danger',
       onConfirm: () => {
         deleteTaskMutation.mutate(task.id);
@@ -1686,10 +1687,10 @@ export default function LeadPJDetail() {
                                   variant="ghost"
                                   onClick={() => handleDeleteTask(task)}
                                   disabled={deleteTaskMutation.isPending}
-                                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 h-8 w-8 p-0"
-                                  title="Remover"
+                                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/30 h-8 w-8 p-0"
+                                  title="Cancelar agendamento"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Ban className="w-3.5 h-3.5" />
                                 </Button>
                               </div>
                             </div>
@@ -2101,7 +2102,7 @@ export default function LeadPJDetail() {
                   );
                 })()}
 
-                {(isAdmin || isCoordinator) && (
+                {(isAdmin || isCoordinator || isSupervisor) && (
                   <div className="pt-4 border-t border-indigo-200 dark:border-indigo-700 space-y-2">
                     <Label className="text-xs font-semibold text-indigo-900 dark:text-indigo-100 flex items-center gap-1">
                       <Users className="w-3.5 h-3.5" />

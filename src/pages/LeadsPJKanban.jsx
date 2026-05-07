@@ -26,6 +26,7 @@ import {
   Bell,
   CheckCircle2,
   Trash2,
+  Ban,
   MapPin,
   Users,
   Target,
@@ -732,11 +733,12 @@ export default function LeadsPJKanban() {
   });
 
   const deleteTaskMutation = useMutation({
-    mutationFn: ({ taskId }) => base44.entities.ActivityPJ.delete(taskId),
+    mutationFn: ({ taskId }) => base44.entities.ActivityPJ.update(taskId, { outcome: 'cancelado' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allActivitiesPJ'] });
-      toast.success('Tarefa excluída!');
+      toast.success('Agendamento cancelado! O histórico foi preservado.');
     },
+    onError: (err) => toast.error(err?.message || 'Erro ao cancelar agendamento'),
   });
 
   const handleStageChange = useCallback((leadId, newStage, fromStage = null) => {
@@ -803,8 +805,11 @@ export default function LeadsPJKanban() {
       }
     }
 
-    if (filters.agent !== 'all' && String(lead.agent_id) !== filters.agent) {
-      return false;
+    if (filters.agent !== 'all') {
+      const leadAgentRaw = lead.agent_id ?? lead.agentId;
+      if (leadAgentRaw === undefined || leadAgentRaw === null || String(leadAgentRaw) !== String(filters.agent)) {
+        return false;
+      }
     }
 
     if (filters.porte !== 'all' && lead.porte && lead.porte !== filters.porte) {
@@ -1088,22 +1093,22 @@ export default function LeadsPJKanban() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-7 w-7 hover:bg-red-100 dark:hover:bg-red-950 hover:text-red-700 dark:hover:text-red-400"
+                        className="h-7 w-7 hover:bg-rose-100 dark:hover:bg-rose-950 hover:text-rose-700 dark:hover:text-rose-400"
                         onClick={(e) => {
                           e.stopPropagation();
                           setConfirmDialog({
                             isOpen: true,
-                            title: 'Excluir tarefa',
-                            message: 'Tem certeza que deseja excluir esta tarefa?',
-                            confirmLabel: 'Excluir',
+                            title: 'Cancelar agendamento?',
+                            message: 'O agendamento ficará marcado como Cancelado e continuará visível no histórico para consulta. Nenhuma informação será perdida.',
+                            confirmLabel: 'Cancelar agendamento',
                             variant: 'danger',
                             onConfirm: () => { deleteTaskMutation.mutate({ taskId: task.id }); setConfirmDialog(prev => ({ ...prev, isOpen: false })); },
                           });
                         }}
                         disabled={deleteTaskMutation.isPending}
-                        title="Excluir tarefa"
+                        title="Cancelar agendamento"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Ban className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
