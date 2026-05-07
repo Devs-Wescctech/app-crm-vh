@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -16,6 +16,14 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -65,6 +73,8 @@ import {
   Building2,
   Check,
   Ban,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { getAgentDisplayName } from "@/utils/agents";
 import {
@@ -383,6 +393,64 @@ export default function SalesAgenda() {
     );
   };
 
+  const [editingActivity, setEditingActivity] = useState(null);
+  const [editDraft, setEditDraft] = useState({ title: "", description: "", scheduledAt: "" });
+
+  useEffect(() => {
+    if (!editingActivity) return;
+    const sched = getVal(editingActivity, "scheduledAt", "scheduled_at");
+    let local = "";
+    if (sched) {
+      const d = new Date(sched);
+      if (isValid(d)) {
+        const pad = (n) => String(n).padStart(2, "0");
+        local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+    }
+    setEditDraft({
+      title: getVal(editingActivity, "title") || "",
+      description: getVal(editingActivity, "description") || "",
+      scheduledAt: local,
+    });
+  }, [editingActivity]);
+
+  const handleSaveEdit = () => {
+    if (!editingActivity || !editDraft.title.trim()) return;
+    updateActivityMutation.mutate(
+      {
+        id: editingActivity.id,
+        data: {
+          title: editDraft.title,
+          description: editDraft.description || "",
+          scheduled_at: editDraft.scheduledAt ? new Date(editDraft.scheduledAt).toISOString() : null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setEditingActivity(null);
+          toast.success("Agendamento atualizado!");
+        },
+        onError: (err) => toast.error(err?.message || "Erro ao atualizar agendamento"),
+      }
+    );
+  };
+
+  const deleteActivityMutation = useMutation({
+    mutationFn: (id) => base44.entities.ActivityPJ.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["activitiesPJ"] });
+      queryClient.invalidateQueries({ queryKey: ["allActivitiesPJ"] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      toast.success("Agendamento excluído permanentemente.");
+    },
+    onError: (err) => toast.error(err?.message || "Erro ao excluir agendamento"),
+  });
+
+  const handleDeleteActivity = (id) => {
+    if (!window.confirm("ATENÇÃO: Excluir permanentemente este agendamento?\n\nEsta ação NÃO pode ser desfeita e o registro será removido do histórico para sempre.\n\nDica: se quiser apenas remover da agenda mantendo o histórico, use o botão Cancelar.")) return;
+    deleteActivityMutation.mutate(id);
+  };
+
   const navigateDate = (dir) => {
     if (viewMode === "day") setSelectedDate(addDays(selectedDate, dir));
     else if (viewMode === "week") setSelectedDate(dir > 0 ? addWeeks(selectedDate, 1) : subWeeks(selectedDate, 1));
@@ -610,6 +678,8 @@ export default function SalesAgenda() {
             getLeadById={getLeadById}
             handleToggle={handleToggle}
             handleCancel={handleCancelActivity}
+            handleEdit={(act) => { setEditingActivity(act); setSelectedActivity(null); }}
+            handleDelete={handleDeleteActivity}
             agents={agents}
             onClose={() => setSelectedActivity(null)}
           />
@@ -780,6 +850,56 @@ export default function SalesAgenda() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* Edit Activity Dialog */}
+      <Dialog open={!!editingActivity} onOpenChange={(o) => { if (!o) setEditingActivity(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar agendamento</DialogTitle>
+            <DialogDescription>Atualize o título, descrição ou data/hora deste agendamento.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label>Título</Label>
+              <Input
+                value={editDraft.title}
+                onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+                placeholder="Título do agendamento"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Descrição</Label>
+              <Textarea
+                value={editDraft.description}
+                onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                placeholder="Detalhes adicionais"
+                rows={3}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Data e Hora</Label>
+              <Input
+                type="datetime-local"
+                value={editDraft.scheduledAt}
+                onChange={(e) => setEditDraft({ ...editDraft, scheduledAt: e.target.value })}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingActivity(null)}>Cancelar</Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={updateActivityMutation.isPending || !editDraft.title.trim()}
+              style={{ background: `linear-gradient(135deg, ${BRAND.burgundy}, ${BRAND.coral})`, color: "white" }}
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1089,7 +1209,7 @@ function SidebarMiniCalendar({ currentMonth, setCurrentMonth, selectedDate, setS
   );
 }
 
-function ActivityPopover({ activity, getLeadById, handleToggle, handleCancel, agents = [], onClose }) {
+function ActivityPopover({ activity, getLeadById, handleToggle, handleCancel, handleEdit, handleDelete, agents = [], onClose }) {
   const cfg = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.task;
   const Icon = cfg.icon;
   const leadId = getVal(activity, "leadId", "lead_id");
@@ -1175,29 +1295,55 @@ function ActivityPopover({ activity, getLeadById, handleToggle, handleCancel, ag
             )}
           </div>
 
-          <div className="flex items-center gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
+          <div className="flex flex-col gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
             <Button
               size="sm"
               variant={activity.completed ? "outline" : "default"}
-              className="flex-1 text-xs h-8"
+              className="w-full text-xs h-8"
               style={activity.completed ? {} : { background: `linear-gradient(135deg, ${BRAND.burgundy}, ${BRAND.coral})` }}
               onClick={() => { handleToggle(activity.id, activity.completed); onClose(); }}
             >
               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
               {activity.completed ? "Reabrir" : "Concluir"}
             </Button>
-            {handleCancel && activity.outcome !== "cancelado" && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-xs h-8 border-rose-300 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
-                onClick={() => { handleCancel(activity.id); onClose(); }}
-                title="Cancelar agendamento (mantém no histórico)"
-              >
-                <Ban className="w-3.5 h-3.5 mr-1" />
-                Cancelar
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {handleEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 text-xs h-8"
+                  onClick={() => handleEdit(activity)}
+                  title="Editar agendamento"
+                >
+                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                  Editar
+                </Button>
+              )}
+              {handleCancel && activity.outcome !== "cancelado" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 text-xs h-8 border-rose-300 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
+                  onClick={() => { handleCancel(activity.id); onClose(); }}
+                  title="Cancelar agendamento (mantém no histórico)"
+                >
+                  <Ban className="w-3.5 h-3.5 mr-1" />
+                  Cancelar
+                </Button>
+              )}
+              {handleDelete && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 text-xs h-8 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+                  onClick={() => { handleDelete(activity.id); onClose(); }}
+                  title="Excluir permanentemente (não pode ser desfeito)"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  Excluir
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
