@@ -64,6 +64,7 @@ import {
   Search,
   Building2,
   Check,
+  Ban,
 } from "lucide-react";
 import { getAgentDisplayName } from "@/utils/agents";
 import {
@@ -371,6 +372,17 @@ export default function SalesAgenda() {
     toast.success(current ? "Atividade reaberta" : "Atividade concluída!");
   };
 
+  const handleCancelActivity = (id) => {
+    if (!window.confirm("Cancelar este agendamento?\n\nEle ficará marcado como Cancelado e continuará visível no histórico para consulta. Nenhuma informação será perdida.")) return;
+    updateActivityMutation.mutate(
+      { id, data: { outcome: "cancelado" } },
+      {
+        onSuccess: () => toast.success("Agendamento cancelado! O histórico foi preservado."),
+        onError: (err) => toast.error(err?.message || "Erro ao cancelar agendamento"),
+      }
+    );
+  };
+
   const navigateDate = (dir) => {
     if (viewMode === "day") setSelectedDate(addDays(selectedDate, dir));
     else if (viewMode === "week") setSelectedDate(dir > 0 ? addWeeks(selectedDate, 1) : subWeeks(selectedDate, 1));
@@ -597,6 +609,7 @@ export default function SalesAgenda() {
             activity={selectedActivity}
             getLeadById={getLeadById}
             handleToggle={handleToggle}
+            handleCancel={handleCancelActivity}
             agents={agents}
             onClose={() => setSelectedActivity(null)}
           />
@@ -1076,7 +1089,7 @@ function SidebarMiniCalendar({ currentMonth, setCurrentMonth, selectedDate, setS
   );
 }
 
-function ActivityPopover({ activity, getLeadById, handleToggle, agents = [], onClose }) {
+function ActivityPopover({ activity, getLeadById, handleToggle, handleCancel, agents = [], onClose }) {
   const cfg = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.task;
   const Icon = cfg.icon;
   const leadId = getVal(activity, "leadId", "lead_id");
@@ -1173,6 +1186,18 @@ function ActivityPopover({ activity, getLeadById, handleToggle, agents = [], onC
               <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
               {activity.completed ? "Reabrir" : "Concluir"}
             </Button>
+            {handleCancel && activity.outcome !== "cancelado" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs h-8 border-rose-300 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950"
+                onClick={() => { handleCancel(activity.id); onClose(); }}
+                title="Cancelar agendamento (mantém no histórico)"
+              >
+                <Ban className="w-3.5 h-3.5 mr-1" />
+                Cancelar
+              </Button>
+            )}
           </div>
         </div>
       </div>
