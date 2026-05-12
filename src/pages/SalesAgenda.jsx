@@ -334,7 +334,7 @@ export default function SalesAgenda() {
       try { return isSameDay(parseISO(a.scheduledAt), today); } catch { return false; }
     });
     const overdue = filtered.filter((a) => {
-      if (!a.scheduledAt || a.completed) return false;
+      if (!a.scheduledAt || a.completed || a.outcome === "cancelado") return false;
       try { const d = parseISO(a.scheduledAt); return isPast(d) && !isSameDay(d, today); } catch { return false; }
     });
     const weekS = startOfWeek(today, { locale: ptBR });
@@ -1008,21 +1008,21 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
                     key={act.id}
                     onClick={() => onActivityClick(act)}
                     title={reassigned ? `Recebida de ${originalAgentName}` : undefined}
-                    className="absolute z-[15] rounded px-1.5 py-0.5 text-left overflow-hidden cursor-pointer hover:opacity-90 transition-opacity group"
+                    className={`absolute z-[15] rounded px-1.5 py-0.5 text-left overflow-hidden cursor-pointer hover:opacity-90 transition-opacity group ${act.outcome === "cancelado" ? "opacity-60" : ""}`}
                     style={{
                       top: `${minutesSince6am}px`,
                       left: `calc(56px + ${leftPct}% + 2px)`,
                       width: `calc(${widthPct}% - 6px)`,
                       height: '54px',
-                      backgroundColor: act.completed ? '#f3f4f6' : cfg.bg,
-                      borderLeft: `3px solid ${act.completed ? '#9ca3af' : cfg.color}`,
-                      borderTop: `1px solid ${act.completed ? '#d1d5db' : cfg.border}`,
-                      borderRight: `1px solid ${act.completed ? '#d1d5db' : cfg.border}`,
-                      borderBottom: `1px solid ${act.completed ? '#d1d5db' : cfg.border}`,
+                      backgroundColor: act.outcome === "cancelado" ? '#fef2f2' : (act.completed ? '#f3f4f6' : cfg.bg),
+                      borderLeft: `3px solid ${act.outcome === "cancelado" ? '#dc2626' : (act.completed ? '#9ca3af' : cfg.color)}`,
+                      borderTop: `1px solid ${act.outcome === "cancelado" ? '#fecaca' : (act.completed ? '#d1d5db' : cfg.border)}`,
+                      borderRight: `1px solid ${act.outcome === "cancelado" ? '#fecaca' : (act.completed ? '#d1d5db' : cfg.border)}`,
+                      borderBottom: `1px solid ${act.outcome === "cancelado" ? '#fecaca' : (act.completed ? '#d1d5db' : cfg.border)}`,
                     }}
                   >
-                    <p className={`text-[11px] font-medium truncate flex items-center gap-1 ${act.completed ? "line-through text-gray-400" : ""}`}
-                      style={act.completed ? {} : { color: cfg.color }}
+                    <p className={`text-[11px] font-medium truncate flex items-center gap-1 ${act.outcome === "cancelado" ? "line-through text-red-700" : (act.completed ? "line-through text-gray-400" : "")}`}
+                      style={(act.completed || act.outcome === "cancelado") ? {} : { color: cfg.color }}
                     >
                       {reassigned && (
                         <ArrowRight className="w-3 h-3 flex-shrink-0 text-amber-600" />
@@ -1031,6 +1031,9 @@ function TimeGrid({ days, getActivitiesForDay, googleEventsForDay, showGoogleEve
                     </p>
                     <p className="text-[10px] text-gray-500 truncate">
                       {format(scheduled, "HH:mm")} · {cfg.label}
+                      {act.outcome === "cancelado" && (
+                        <span className="text-red-700 font-semibold"> · Cancelado</span>
+                      )}
                       {reassigned && originalAgentName && (
                         <span className="text-amber-700"> · de {originalAgentName}</span>
                       )}

@@ -1603,10 +1603,13 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       );
       actingAgent = meRes.rows[0];
       const actingType = actingAgent?.agent_type;
-      const canReassign = actingType === 'admin' || actingType === 'coordinator';
+      const canReassign =
+        actingType === 'admin' ||
+        actingType === 'coordinator' ||
+        actingType === 'supervisor';
       if (!canReassign) {
         return res.status(403).json({
-          message: 'Apenas admin ou coordenador podem reatribuir o agente responsável deste lead.',
+          message: 'Apenas admin, coordenador ou supervisor podem reatribuir o agente responsável deste lead.',
         });
       }
     }
