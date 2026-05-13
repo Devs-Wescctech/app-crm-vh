@@ -1603,13 +1603,23 @@ router.put('/leads-pj/:id', authMiddleware, async (req, res) => {
       );
       actingAgent = meRes.rows[0];
       const actingType = actingAgent?.agent_type;
+      console.log('[Reassign] Tentativa de reatribuição', {
+        leadId: id,
+        actor: { id: req.user.id, name: actingAgent?.name, agent_type: actingType, jwt_role: req.user.role },
+        from: oldLead.agent_id,
+        to: data.agent_id,
+      });
       const canReassign =
         actingType === 'admin' ||
         actingType === 'coordinator' ||
-        actingType === 'supervisor';
+        actingType === 'supervisor' ||
+        req.user.role === 'admin' ||
+        req.user.role === 'coordinator' ||
+        req.user.role === 'supervisor';
       if (!canReassign) {
+        console.warn('[Reassign] BLOQUEADO — perfil sem permissão', { actingType, jwt_role: req.user.role });
         return res.status(403).json({
-          message: 'Apenas admin, coordenador ou supervisor podem reatribuir o agente responsável deste lead.',
+          message: `Sem permissão para reatribuir. Seu perfil no banco é "${actingType || 'desconhecido'}" (no token: "${req.user.role || 'desconhecido'}"). Apenas admin, coordenador ou supervisor podem reatribuir.`,
         });
       }
     }

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -596,12 +597,27 @@ export default function LeadPJDetail() {
       }
     },
     onError: (err) => {
-      toast.error(err?.message || 'Não foi possível reatribuir o agente.');
+      const msg = err?.message || 'Não foi possível reatribuir o agente.';
+      console.error('[Reassign] Falha ao reatribuir agente:', err);
+      toast.error(`Erro ao reatribuir: ${msg}`, { duration: 8000 });
     },
   });
 
   const handleReassignAgent = () => {
-    if (!reassignAgentId) return;
+    if (!reassignAgentId) {
+      toast.error('Escolha um agente da lista antes de clicar em Reatribuir.');
+      return;
+    }
+    if (String(reassignAgentId) === String(leadAgentId)) {
+      toast.error('O agente escolhido já é o responsável atual.');
+      return;
+    }
+    console.log('[Reassign] Iniciando reatribuição', {
+      leadId,
+      from: leadAgentId,
+      to: reassignAgentId,
+      transferPending: transferPendingActivities,
+    });
     reassignAgentMutation.mutate({
       newAgentId: reassignAgentId,
       transferPending: transferPendingActivities,
@@ -1348,6 +1364,32 @@ export default function LeadPJDetail() {
                   <span className={`h-2 w-2 rounded-full ${currentStage?.color}`} />
                   {currentStage?.label}
                 </span>
+                {(() => {
+                  const isQualified = editedLead.isQualified !== undefined
+                    ? editedLead.isQualified
+                    : (lead.isQualified ?? lead.is_qualified ?? false);
+                  return (
+                    <label
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold cursor-pointer transition-colors ${
+                        isQualified
+                          ? "bg-emerald-500/20 text-white border border-emerald-300/40 hover:bg-emerald-500/30"
+                          : "bg-white/10 text-white/80 border border-white/20 hover:bg-white/20"
+                      }`}
+                      title={
+                        isQualified
+                          ? "Lead marcado como qualificado manualmente. Clique para desmarcar."
+                          : "Marcar manualmente este lead como qualificado."
+                      }
+                    >
+                      <Switch
+                        checked={isQualified}
+                        onCheckedChange={(checked) => handleFieldChange("isQualified", checked === true)}
+                        className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-white/30"
+                      />
+                      <span>{isQualified ? "Qualificado" : "Qualificar manualmente"}</span>
+                    </label>
+                  );
+                })()}
                 <TemperatureBadge
                   value={currentTemperatureKey}
                   onChange={handleTemperatureChange}

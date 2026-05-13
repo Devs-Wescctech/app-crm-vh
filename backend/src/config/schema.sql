@@ -1599,3 +1599,11 @@ WHERE a.team_id = t.id
 -- =====================
 ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS outcome VARCHAR(100);
 ALTER TABLE activities    ADD COLUMN IF NOT EXISTS outcome VARCHAR(100);
+
+-- =====================
+-- FEATURE: flag manual de qualificação no lead PJ.
+-- Independente do stage do funil — permite ao usuário marcar/desmarcar
+-- que o lead foi qualificado manualmente (mesmo se ele estiver em
+-- outro estágio). NULL/false = não qualificado, true = qualificado.
+-- =====================
+ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS is_qualified BOOLEAN DEFAULT FALSE;
