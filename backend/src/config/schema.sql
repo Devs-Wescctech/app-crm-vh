@@ -1607,3 +1607,16 @@ ALTER TABLE activities    ADD COLUMN IF NOT EXISTS outcome VARCHAR(100);
 -- outro estágio). NULL/false = não qualificado, true = qualificado.
 -- =====================
 ALTER TABLE leads_pj ADD COLUMN IF NOT EXISTS is_qualified BOOLEAN DEFAULT FALSE;
+
+-- =====================
+-- BUGFIX: instalações antigas foram criadas SEM `duration_minutes` e
+-- SEM `google_event_id` em activities/activities_pj. A reatribuição de
+-- agente faz SELECT/UPDATE nessas colunas dentro da transação, então
+-- a transação inteira aborta com `column "duration_minutes" does not
+-- exist` e o usuário vê 500 ao reatribuir. Idem para google_event_id
+-- (usado para forçar recriação na agenda do novo responsável).
+-- =====================
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
+ALTER TABLE activities    ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS google_event_id  VARCHAR(255);
+ALTER TABLE activities    ADD COLUMN IF NOT EXISTS google_event_id  VARCHAR(255);
