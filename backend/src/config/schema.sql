@@ -1588,3 +1588,14 @@ WHERE a.team_id = t.id
   AND a.agent_type = 'sales'
   AND t.supervisor_id IS NOT NULL
   AND a.supervisor_id IS NULL;
+
+-- =====================
+-- BUGFIX: garantir que activities_pj/activities tenham a coluna `outcome`
+-- (cancelado/realizada/etc). Em instalações antigas a coluna foi adicionada
+-- ao schema.sql só depois da tabela ser criada — como o CREATE TABLE usa
+-- IF NOT EXISTS, ela não foi propagada. Sem essa coluna, o backend
+-- silenciosamente descarta o campo em PUT (filterValidColumns), e o
+-- usuário vê o cancelamento "passar" sem efeito.
+-- =====================
+ALTER TABLE activities_pj ADD COLUMN IF NOT EXISTS outcome VARCHAR(100);
+ALTER TABLE activities    ADD COLUMN IF NOT EXISTS outcome VARCHAR(100);
